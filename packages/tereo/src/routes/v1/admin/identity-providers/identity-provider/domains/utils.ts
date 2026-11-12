@@ -2,6 +2,7 @@ import { getDefaultOrganizationId } from "../../../../../../utils/defaultOrganiz
 import { assertAdministersOrganization } from "../../../../../../utils/orgRoleAuth.js";
 import type { Prisma } from "../../../../../../../prisma/generated/client/index.js";
 import { formatDomain } from "../../../../../../utils/identityProviders/format.js";
+import { assertMayRedirectScim } from "../../../../../../utils/scim/tokens.js";
 import type { AuthContext } from "../../../../../../middleware/auth.js";
 import { assertGlobalAdmin } from "../../../../../../utils/grants.js";
 import { ConflictError } from "../../../../../../utils/errors.js";
@@ -49,6 +50,23 @@ export const assertMayChangeSsoOnly = (
   assertGlobalAdmin(
     auth,
     "Only an administrator (global admin) can make a domain SSO-only, move an SSO-only domain or lift SSO-only",
+    tx
+  );
+
+/**
+ * A SCIM connection adopts and signs in users of its provider's domains, so a
+ * new or renamed domain hands it accounts there. The caller holds the
+ * provider's row lock.
+ */
+export const assertMayAddScimDomain = (
+  auth: Pick<AuthContext, "userId" | "ceiling">,
+  providerId: string,
+  tx: Prisma.TransactionClient
+) =>
+  assertMayRedirectScim(
+    auth,
+    providerId,
+    "Only an administrator (global admin) can add or rename a domain of a provider with a SCIM connection",
     tx
   );
 

@@ -4,6 +4,7 @@ import wellKnownRouter from "./well-known/index.js";
 import { serveAppShell } from "./controllers.js";
 import healthRouter from "./health/index.js";
 import oauthRouter from "./oauth/index.js";
+import scimRouter from "./scim/index.js";
 import v1Router from "./v1/index.js";
 import { Router } from "express";
 
@@ -17,6 +18,7 @@ const router = Router();
 router.use("/.well-known", ...smallBodyParsers, wellKnownRouter);
 router.use("/health", healthRouter);
 router.use("/oauth", ...smallBodyParsers, oauthRouter);
+router.use("/scim", scimRouter);
 router.use("/v1", v1Router);
 
 // The admin UI takes whatever is left, so it comes last: its files, then the

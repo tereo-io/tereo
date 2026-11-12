@@ -136,13 +136,20 @@
       new one. Add another provider instead. (At Entra, whose `sub` is pairwise per
       app registration, a `clientId` change breaks links the same way; core cannot
       detect that.) `issuer` cannot change while an unexpired identity invite names
-      the provider (409 `provider_has_invites`): withdraw the invites first.
+      the provider (409 `provider_has_invites`): withdraw the invites first. A user
+      the provider's SCIM connection manages (not deleted, not unlinked) who has no
+      identity at the provider counts as such an invite, since their first sign-in
+      would claim the account.
       Turning `countsAsMfa` on needs a caller holding `admin` through a global role
       (403 otherwise), and so does changing `issuer` or `clientId` while it stays
       on; turning it off does not. Changing `issuer` or `clientId` of a provider
       with an SSO-only domain needs global `admin` too (403 otherwise): its
       password users are force-linked to whoever the provider vouches for.
-      Other errors are those of create.
+      On a provider with a SCIM connection (active or not), changing `issuer` or
+      `clientId`, or sending any `clientSecret`, needs global `admin` too (403
+      otherwise), decided under the provider's row lock: the connection lets the
+      provider sign in as every user it manages, so whoever runs the new issuer or
+      client would. Other errors are those of create.
 
       An audit log entry is created for this action.
       An `auth.identity-provider.updated` webhook event is emitted.
@@ -240,6 +247,8 @@
       Puts the provider back on the login page. The configuration is validated
       against the issuer again, since it may have changed while the provider was
       inactive (400 `invalid_provider_config` / `provider_unreachable`).
+      Activating a provider with a SCIM connection resumes that connection, so it
+      needs `admin` through a global role (403 otherwise), as enabling SCIM does.
 
       An audit log entry is created for this action.
       An `auth.identity-provider.activated` webhook event is emitted.
@@ -324,7 +333,10 @@
       sign-in at an SSO-only domain is force-linked to the provider. Creating
       a domain SSO-only ends, shortly after and in the background, every
       session of its users who hold an identity at another provider (audited
-      and emitted as `auth.user.sessions-revoked`).
+      and emitted as `auth.user.sessions-revoked`). On a provider with a SCIM
+      connection (active or not), adding a domain needs `admin` through a global
+      role (403 otherwise): the connection adopts and signs in users of the
+      provider's domains.
 
       `roleIds` must be roles that may be assigned within an organization: 400
       `unknown_role` for an unknown, archived or retired role, 400
@@ -418,7 +430,9 @@
       users to (403 `organization_not_permitted`), as on create. Errors are those
       of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
       deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
-      an SSO-only domain, needs `admin` through a global role (403 otherwise).
+      an SSO-only domain, needs `admin` through a global role (403 otherwise), as
+      does changing the `domain` of a provider with a SCIM connection. Deleting a
+      domain of such a provider does not.
       A change that makes the domain SSO-only (or renames an SSO-only one)
       ends the sessions of its users who hold an identity at another
       provider, as on create.

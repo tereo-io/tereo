@@ -122,7 +122,11 @@ const text = (value: unknown): string | null =>
 // UserIdentity.subject's column width.
 const SUBJECT_MAX_LENGTH = 255;
 
-const toIdentity = (
+// Any other issuer may send an `oid` claim of its choosing.
+const ENTRA_TENANT_ISSUER =
+  /^https:\/\/login\.microsoftonline\.com\/[0-9a-f-]{36}\/v2\.0$/;
+
+export const toIdentity = (
   provider: IdentityProvider,
   claims: client.IDToken
 ): NormalizedIdentity => {
@@ -144,6 +148,9 @@ const toIdentity = (
     firstName: text(claims.given_name),
     lastName: text(claims.family_name),
     hostedDomain: text(claims.hd),
+    objectId: ENTRA_TENANT_ISSUER.test(provider.issuer ?? "")
+      ? text(claims.oid)
+      : null,
     authTime:
       typeof claims.auth_time === "number" && Number.isFinite(claims.auth_time)
         ? new Date(claims.auth_time * 1000)

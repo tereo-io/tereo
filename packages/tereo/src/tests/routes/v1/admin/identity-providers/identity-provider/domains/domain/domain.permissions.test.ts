@@ -2,6 +2,7 @@
 // @module-tag auth
 
 import { generateUniqueId } from "../../../../../../../support/auth/crypto.js";
+import { SYSTEM_USER_ID } from "../../../../../../../../definitions/index.js";
 import { prisma } from "../../../../../../../../utils/db/prisma.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { CORE_URL } from "../../../../../../../support/coreUrl.js";
@@ -198,5 +199,48 @@ describe("PATCH and DELETE /v1/admin/identity-providers/:id/domains/:domainId", 
     expect(same.status).toBe(200);
 
     expect((await call(adminToken, "DELETE", path)).status).toBe(204);
+  });
+
+  it("needs a global admin to change the domain of a provider with a SCIM connection, not to delete it", async () => {
+    const scim = await newProvider();
+    await prisma.scimConnection.create({
+      data: { providerId: scim.id, createdBy: SYSTEM_USER_ID },
+    });
+    const plain = await newProvider();
+    const name = () => `scimmv-${generateUniqueId().toLowerCase()}.com`;
+    const domainOf = async (providerId: string) => {
+      const created = await postDomain(adminToken, providerId, {
+        domain: name(),
+      });
+      expect(created.status).toBe(201);
+      const domain = await created.json();
+      return { ...domain, path: `/${providerId}/domains/${domain.id}` };
+    };
+
+    const domain = await domainOf(scim.id);
+    expect(
+      (await call(writeToken, "PATCH", domain.path, { domain: name() })).status
+    ).toBe(403);
+    expect(
+      (
+        await prisma.identityProviderDomain.findUniqueOrThrow({
+          where: { id: domain.id },
+        })
+      ).domain
+    ).toBe(domain.domain);
+    // What does not move the domain stays the provider admin's.
+    expect(
+      (await call(writeToken, "PATCH", domain.path, { autoAccept: true }))
+        .status
+    ).toBe(200);
+    expect(
+      (await call(adminToken, "PATCH", domain.path, { domain: name() })).status
+    ).toBe(200);
+    expect((await call(writeToken, "DELETE", domain.path)).status).toBe(204);
+
+    const free = await domainOf(plain.id);
+    expect(
+      (await call(writeToken, "PATCH", free.path, { domain: name() })).status
+    ).toBe(200);
   });
 });

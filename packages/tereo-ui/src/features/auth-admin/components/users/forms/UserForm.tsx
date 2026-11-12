@@ -2,12 +2,13 @@ import { Col, Form, Input, Select } from "@kosmeo-ui/react";
 import { useState } from "react";
 import type {
   User,
+  UserManager,
   CreateUserInput,
   UpdateUserInput,
 } from "@/features/auth-admin/api/users/types";
 
 interface UserFormProps {
-  user?: User;
+  user?: User & { managedBy?: UserManager | null };
   onSubmit: (data: CreateUserInput | UpdateUserInput) => void;
   formId?: string;
 }
@@ -19,6 +20,9 @@ export const UserForm = ({ user, onSubmit, formId }: UserFormProps) => {
   const [isActive, setIsActive] = useState(
     user ? String(user.isActive) : "true"
   );
+
+  // The provider owns these two; the server answers 409 managed_by_scim.
+  const scimManaged = user?.managedBy?.kind === "scim";
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,6 +54,7 @@ export const UserForm = ({ user, onSubmit, formId }: UserFormProps) => {
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
+          disabled={scimManaged}
           required
         />
         <Input
@@ -57,6 +62,7 @@ export const UserForm = ({ user, onSubmit, formId }: UserFormProps) => {
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          disabled={scimManaged}
           placeholder="Optional"
         />
         <Input

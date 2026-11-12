@@ -2,12 +2,14 @@ import { SYSTEM_USER, SYSTEM_USER_ID } from "../../definitions/index.js";
 import type { IdentityProvider, NormalizedIdentity } from "./types.js";
 import { emitTx, logAuditTx, type AuditLogInput } from "../outbox.js";
 import { getDefaultOrganizationId } from "../defaultOrganization.js";
+import { domainPlacement, organizationClosed } from "./placement.js";
+import { createUserInOrganizationTx } from "../userLifecycle.js";
 import { uniqueViolationFields } from "../prismaErrors.js";
 import { emailDomain, normalizeEmail } from "../email.js";
 import { markVerifiedFromProvider } from "./verify.js";
-import { formatUser } from "../transformers.js";
-import type { Prisma } from "../db/prisma.js";
+import type { ScimUserLink } from "../db/scim.js";
 import { isUsableAccount } from "../users.js";
+import type { Prisma } from "../db/prisma.js";
 import { emailTrusted } from "./trust.js";
 import { logger } from "../logger.js";
 import db from "../db/index.js";
@@ -50,7 +52,7 @@ export const ssoProviderElsewhere = async (
 const clip = (value: string | null): string | null =>
   value?.trim().slice(0, NAME_MAX) || null;
 
-/** Never matches an existing account by email: only by subject, an invite, or a new user. */
+/** Matches an existing account by email only for the SCIM claim; otherwise by subject, an invite, or a new user. */
 export const resolveLoginIdentity = async (
   provider: IdentityProvider,
   identity: NormalizedIdentity
@@ -110,12 +112,121 @@ const signInLinked = async (
   return { userId: linked.userId };
 };
 
+type ClaimRule = "objectId" | "email";
+
+/** The one live link a rule finds, or "ambiguous" (logged) when it finds several. */
+const claimableBy = async (
+  provider: IdentityProvider,
+  connectionId: string,
+  rule: ClaimRule,
+  by: { externalId: string } | { email: string }
+): Promise<ScimUserLink | "ambiguous" | null> => {
+  const found = await db.scim.findClaimable(connectionId, by);
+  if (found.length <= 1) return found[0] ?? null;
+  logger.warn(
+    { providerId: provider.id, rule, matches: found.length },
+    "Several SCIM users match a first sign-in; claiming none"
+  );
+  return "ambiguous";
+};
+
+/**
+ * A first sign-in of a user this provider's SCIM connection manages: by
+ * Entra's object id as the SCIM `externalId`, else by a trusted email equal
+ * to the user's own. Null falls through to the invite lookup.
+ */
+const claimScimUser = async (
+  provider: IdentityProvider,
+  identity: NormalizedIdentity
+): Promise<Resolution | null> => {
+  if (!provider.isActive) return null;
+  const connection = await db.scim.getConnectionByProvider(provider.id);
+  if (!connection?.isActive) return null;
+
+  let match: ScimUserLink | "ambiguous" | null = null;
+  if (identity.objectId !== null) {
+    match = await claimableBy(provider, connection.id, "objectId", {
+      externalId: identity.objectId,
+    });
+  }
+  if (match === null && identity.email !== null) {
+    const email = normalizeEmail(identity.email);
+    if (emailTrusted(provider, identity, email, "invite")) {
+      match = await claimableBy(provider, connection.id, "email", { email });
+    }
+  }
+  if (match === null || match === "ambiguous") return null;
+
+  const user = await db.users.get(match.userId);
+  const required = await ssoProviderElsewhere(user.email, provider.id);
+  if (required) return { error: "sso_required", provider: required };
+  // One account per provider per user, unless a concurrent sign-in of this
+  // subject just linked it.
+  if (await db.userIdentities.getForUserAtProvider(user.id, provider.id)) {
+    return await signInLinked(provider, identity);
+  }
+  // Nothing links a deactivated or expired account. Naming it lets the
+  // callback refuse it as such; unlinked, it is never signed in.
+  if (!isUsableAccount(user)) return { userId: user.id };
+
+  // Again under the user's row lock, which SCIM's writes and an admin's
+  // unlink take: a deactivation, delete, unlink or pause that committed
+  // since the checks above stops the link.
+  const outcome = await db.$transaction(async (tx) => {
+    await db.users.lockForSignInChange(user.id, tx);
+    const link = await db.scim.getLinkByUser(user.id, tx);
+    const current = await db.scim.getConnectionByProvider(provider.id, tx);
+    const locked = await db.users.get(user.id, tx);
+    if (
+      link?.id !== match.id ||
+      link.deletedAt !== null ||
+      link.unlinkedAt !== null ||
+      !current?.isActive ||
+      !(await db.identityProviders.get(provider.id, tx)).isActive ||
+      locked.email !== user.email
+    ) {
+      return "gone" as const;
+    }
+    if (
+      await db.userIdentities.getForUserAtProvider(user.id, provider.id, tx)
+    ) {
+      return "already linked" as const;
+    }
+    if (!isUsableAccount(locked)) return "unusable" as const;
+    await linkIdentity(
+      tx,
+      { userId: user.id, email: locked.email },
+      user.id,
+      provider,
+      identity,
+      { via: "scim", scimConnectionId: connection.id }
+    );
+    return "claimed" as const;
+  });
+  switch (outcome) {
+    case "gone":
+      return null;
+    case "already linked":
+      // A concurrent sign-in claimed the user first: this subject's own link,
+      // or another subject's, as a unique violation would have said.
+      return (
+        (await signInLinked(provider, identity)) ?? { error: "account_exists" }
+      );
+    case "unusable":
+    case "claimed":
+      return { userId: user.id };
+  }
+};
+
 const resolveOnce = async (
   provider: IdentityProvider,
   identity: NormalizedIdentity
 ): Promise<Resolution> => {
   const linked = await signInLinked(provider, identity);
   if (linked) return linked;
+
+  const scim = await claimScimUser(provider, identity);
+  if (scim) return scim;
 
   if (identity.email === null) return { error: "no_account" };
   const email = normalizeEmail(identity.email);
@@ -157,7 +268,7 @@ const resolveOnce = async (
   if (!domain || domain.providerId !== provider.id || !domain.autoAccept) {
     return { error: "no_account" };
   }
-  if (domain.organization.archivedAt || !domain.organization.isActive) {
+  if (organizationClosed(domain.organization)) {
     logger.warn(
       { domain: domain.domain, organizationId: domain.organizationId },
       "Auto-accept domain's organization is archived or inactive; not provisioning"
@@ -179,16 +290,14 @@ const provision = async (
   email: string,
   domainId: string
 ): Promise<string> => {
-  const domain = await db.identityProviders.getDomain(provider.id, domainId);
-  const orgId = domain.organizationId;
-  // A default role archived or retired since it was chosen is not granted.
-  const roles = await db.roles.getByIds(domain.roles.map((r) => r.role.id));
-  const roleIds = roles.map((r) => r.id);
+  const placement = await domainPlacement(provider.id, domainId);
 
   return await db.$transaction(async (tx) => {
     const firstName = clip(identity.firstName);
     const lastName = clip(identity.lastName);
-    const user = await db.users.createWithoutPassword(
+    const user = await createUserInOrganizationTx(
+      tx,
+      SYSTEM_ACTOR,
       {
         email,
         name:
@@ -197,82 +306,9 @@ const provision = async (
         firstName,
         lastName,
       },
-      tx
+      placement,
+      { providerId: provider.id }
     );
-    await logAuditTx(tx, {
-      auth: SYSTEM_ACTOR,
-      action: "CREATE",
-      entityType: "User",
-      entityId: user.id,
-      entityName: user.email,
-      metadata: {
-        email: user.email,
-        name: user.name,
-        userType: user.userType,
-        providerId: provider.id,
-      },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.user.created",
-      entityType: "User",
-      entityId: user.id,
-      data: formatUser(user) as unknown as Record<string, unknown>,
-    });
-
-    const member = await db.organizations.addMember(
-      orgId,
-      user.id,
-      "member",
-      tx
-    );
-    await logAuditTx(tx, {
-      auth: SYSTEM_ACTOR,
-      organizationId: orgId,
-      action: "CREATE",
-      entityType: "OrganizationMember",
-      entityId: member.id,
-      entityName: user.email,
-      metadata: { userId: user.id, memberRole: member.memberRole },
-    });
-    await emitTx(tx, {
-      organizationId: getDefaultOrganizationId(),
-      eventType: "auth.organization.member-added",
-      entityType: "OrganizationMember",
-      entityId: member.id,
-      data: {
-        organizationId: orgId,
-        userId: user.id,
-        email: user.email,
-        memberRole: member.memberRole,
-      },
-    });
-
-    if (roleIds.length > 0) {
-      await db.organizations.setMemberRoles(orgId, user.id, roleIds, tx);
-      await logAuditTx(tx, {
-        auth: SYSTEM_ACTOR,
-        organizationId: orgId,
-        action: "UPDATE",
-        entityType: "OrganizationMember",
-        entityId: member.id,
-        entityName: user.email,
-        metadata: { action: "roles_changed", userId: user.id, roleIds },
-      });
-      await emitTx(tx, {
-        organizationId: getDefaultOrganizationId(),
-        eventType: "auth.organization.member-roles-changed",
-        entityType: "OrganizationMember",
-        entityId: member.id,
-        data: {
-          organizationId: orgId,
-          userId: user.id,
-          email: user.email,
-          roleIds,
-        },
-      });
-    }
-
     await linkIdentity(tx, SYSTEM_ACTOR, user.id, provider, identity);
     return user.id;
   });
@@ -284,7 +320,8 @@ export const linkIdentity = async (
   userId: string,
   provider: IdentityProvider,
   identity: Pick<NormalizedIdentity, "subject" | "email"> &
-    Partial<Pick<NormalizedIdentity, "emailVerified" | "hostedDomain">>
+    Partial<Pick<NormalizedIdentity, "emailVerified" | "hostedDomain">>,
+  auditMetadata: Record<string, string> = {}
 ): Promise<{ id: string }> => {
   const email = identity.email === null ? null : normalizeEmail(identity.email);
   const created = await db.userIdentities.create(
@@ -300,6 +337,7 @@ export const linkIdentity = async (
     entityId: created.id,
     entityName: user.email,
     metadata: {
+      ...auditMetadata,
       userId,
       providerId: provider.id,
       provider: provider.slug,

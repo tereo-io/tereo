@@ -21,6 +21,7 @@ const identity = (authTime: Date | null): NormalizedIdentity => ({
   firstName: null,
   lastName: null,
   hostedDomain: null,
+  objectId: null,
   authTime,
 });
 

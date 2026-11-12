@@ -108,24 +108,24 @@ model User {
   // password, an admin's): promoting a guest is refused until they set their own.
   passwordSetByUser      Boolean   @default(true) @map("password_set_by_user")
 
-  authCodes                  AuthorizationCode[]
-  refreshTokens              RefreshToken[]
-  userRoles                  UserRole[]
-  recoveryCodes              RecoveryCode[]
-  totpVerifications          TotpVerification[]
-  consentSessions            ConsentSession[]
-  userSessions               UserSession[]
-  organizationMembers        OrganizationMember[]
-  orgSelectionSessions       OrgSelectionSession[]
-  accessTokens               AccessToken[]
-  totpSetupSessions          TotpSetupSession[]
-  totpSetupGrants            TotpSetupGrant[]
-  passwordChangeGrants       PasswordChangeGrant[]
-  webhookEndpointsCreated    WebhookEndpoint[]     @relation("WebhookEndpointCreator")
-  ownedClients               OAuthClient[]         @relation("ClientOwner")
-  oauthClient                OAuthClient?          @relation("ServiceAccountClient", fields: [oauthClientId], references: [id], onDelete: SetNull)
-  userLinkTokens             UserLinkToken[]       @relation("UserLinkTokenUser")
-  userLinkTokensCreated      UserLinkToken[]       @relation("UserLinkTokenCreator")
+  authCodes               AuthorizationCode[]
+  refreshTokens           RefreshToken[]
+  userRoles               UserRole[]
+  recoveryCodes           RecoveryCode[]
+  totpVerifications       TotpVerification[]
+  consentSessions         ConsentSession[]
+  userSessions            UserSession[]
+  organizationMembers     OrganizationMember[]
+  orgSelectionSessions    OrgSelectionSession[]
+  accessTokens            AccessToken[]
+  totpSetupSessions       TotpSetupSession[]
+  totpSetupGrants         TotpSetupGrant[]
+  passwordChangeGrants    PasswordChangeGrant[]
+  webhookEndpointsCreated WebhookEndpoint[]     @relation("WebhookEndpointCreator")
+  ownedClients            OAuthClient[]         @relation("ClientOwner")
+  oauthClient             OAuthClient?          @relation("ServiceAccountClient", fields: [oauthClientId], references: [id], onDelete: SetNull)
+  userLinkTokens          UserLinkToken[]       @relation("UserLinkTokenUser")
+  userLinkTokensCreated   UserLinkToken[]       @relation("UserLinkTokenCreator")
 
   // Actor columns in files and audit. Users are deactivated, never deleted.
   bucketsCreated            Bucket[]            @relation("BucketCreator")
@@ -164,6 +164,9 @@ model User {
   identityInvitesCreated         IdentityInvite[]         @relation("IdentityInviteCreator")
   upstreamAuthSessions           UpstreamAuthSession[]
   identityLinkGrants             IdentityLinkGrant[]
+  scimConnectionsCreated         ScimConnection[]         @relation("ScimConnectionCreator")
+  scimTokensCreated              ScimToken[]              @relation("ScimTokenCreator")
+  scimLink                       ScimUser?
 
   // Branding
   brandingProfilesUpdated BrandingProfile[] @relation("BrandingProfileUpdater")
@@ -841,8 +844,69 @@ model IdentityProvider {
   invites              IdentityInvite[]
   upstreamAuthSessions UpstreamAuthSession[]
   pendingIdentityLinks PendingIdentityLink[]
+  scimConnection       ScimConnection?
 
   @@map("identity_providers")
+  @@schema("auth")
+}
+
+model ScimConnection {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  providerId String    @unique @map("provider_id") @db.Uuid
+  isActive   Boolean   @default(true) @map("is_active")
+  createdBy  String    @map("created_by") @db.Uuid
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  provider IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  creator  User             @relation("ScimConnectionCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  tokens   ScimToken[]
+  users    ScimUser[]
+
+  @@map("scim_connections")
+  @@schema("auth")
+}
+
+model ScimToken {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  connectionId String    @map("connection_id") @db.Uuid
+  hash         String    @unique
+  createdBy    String    @map("created_by") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at")
+  lastUsedAt   DateTime? @map("last_used_at")
+  revokedAt    DateTime? @map("revoked_at")
+
+  connection ScimConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  creator    User           @relation("ScimTokenCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+
+  @@index([connectionId])
+  @@map("scim_tokens")
+  @@schema("auth")
+}
+
+model ScimUser {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  connectionId String    @map("connection_id") @db.Uuid
+  userId       String    @unique @map("user_id") @db.Uuid
+  externalId   String?   @map("external_id") @db.VarChar(255)
+  userName     String    @map("user_name") @db.VarChar(255)
+  // `user_name` lower-cased: what uniqueness and lookups compare.
+  userNameKey  String    @map("user_name_key") @db.VarChar(255)
+  idpActive    Boolean   @map("idp_active")
+  adminHold    Boolean   @default(false) @map("admin_hold")
+  deletedAt    DateTime? @map("deleted_at")
+  // Set by an admin's unlink: the user is excluded from SCIM until released.
+  unlinkedAt   DateTime? @map("unlinked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  connection ScimConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  user       User           @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([connectionId, userNameKey], map: "scim_users_connection_user_name_key")
+  @@index([connectionId])
+  @@map("scim_users")
   @@schema("auth")
 }
 

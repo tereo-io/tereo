@@ -256,8 +256,7 @@
       '404':
         $ref: '../../../components/responses.yaml#/NotFoundResponse'
       '409':
-        $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: Email already in use, or the deactivation would leave no active administrator
+        $ref: '../../../components/auth/responses.yaml#/AdminUserConflictResponse'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

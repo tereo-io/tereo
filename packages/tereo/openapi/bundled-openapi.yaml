@@ -888,6 +888,8 @@ tags:
     description: Admin endpoints for upstream identity providers and their lifecycle events
   - name: Admin - Identity Provider Domains
     description: Admin endpoints for the email domains a provider claims — organization, default roles, auto-accept and SSO-only
+  - name: Admin - Identity Provider SCIM
+    description: Admin endpoints for a provider's SCIM connection and tokens, and for unlinking a managed user. The `/scim/v2` protocol endpoints are described in `docs/scim.md`
   - name: Admin - Guests
     description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
   - name: Password Setup
@@ -4858,8 +4860,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '409':
-          $ref: '#/components/responses/ConflictResponse'
-          description: Email already in use, or the deactivation would leave no active administrator
+          $ref: '#/components/responses/AdminUserConflictResponse'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -9216,13 +9217,20 @@ paths:
         new one. Add another provider instead. (At Entra, whose `sub` is pairwise per
         app registration, a `clientId` change breaks links the same way; core cannot
         detect that.) `issuer` cannot change while an unexpired identity invite names
-        the provider (409 `provider_has_invites`): withdraw the invites first.
+        the provider (409 `provider_has_invites`): withdraw the invites first. A user
+        the provider's SCIM connection manages (not deleted, not unlinked) who has no
+        identity at the provider counts as such an invite, since their first sign-in
+        would claim the account.
         Turning `countsAsMfa` on needs a caller holding `admin` through a global role
         (403 otherwise), and so does changing `issuer` or `clientId` while it stays
         on; turning it off does not. Changing `issuer` or `clientId` of a provider
         with an SSO-only domain needs global `admin` too (403 otherwise): its
         password users are force-linked to whoever the provider vouches for.
-        Other errors are those of create.
+        On a provider with a SCIM connection (active or not), changing `issuer` or
+        `clientId`, or sending any `clientSecret`, needs global `admin` too (403
+        otherwise), decided under the provider's row lock: the connection lets the
+        provider sign in as every user it manages, so whoever runs the new issuer or
+        client would. Other errors are those of create.
 
         An audit log entry is created for this action.
         An `auth.identity-provider.updated` webhook event is emitted.
@@ -9268,6 +9276,8 @@ paths:
         Puts the provider back on the login page. The configuration is validated
         against the issuer again, since it may have changed while the provider was
         inactive (400 `invalid_provider_config` / `provider_unreachable`).
+        Activating a provider with a SCIM connection resumes that connection, so it
+        needs `admin` through a global role (403 otherwise), as enabling SCIM does.
 
         An audit log entry is created for this action.
         An `auth.identity-provider.activated` webhook event is emitted.
@@ -9346,6 +9356,276 @@ paths:
           $ref: '#/components/responses/RateLimitResponse'
         '500':
           $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/identity-providers/{id}/scim:
+    get:
+      tags:
+        - Admin - Identity Provider SCIM
+      summary: Get an identity provider's SCIM connection
+      description: |
+        Returns the provider's SCIM connection with its tokens (never their values) and
+        the number of users it manages. 404 when the provider has no connection.
+
+        The SCIM protocol endpoints under `baseUrl` are described in `docs/scim.md`.
+      operationId: getAdminScimConnection
+      security:
+        - BearerAuth:
+            - identity-providers.read
+      parameters:
+        - $ref: '#/components/parameters/IdentityProviderIdParam'
+      responses:
+        '200':
+          description: The SCIM connection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScimConnection'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+    put:
+      tags:
+        - Admin - Identity Provider SCIM
+      summary: Create a SCIM connection or switch it on or off
+      description: |
+        Creates the provider's SCIM connection (201), or sets `isActive` on the existing one
+        (200). While the connection or the provider is inactive, every SCIM call answers 401.
+
+        Creating a connection and setting `isActive: true` need a caller holding `admin`
+        through a global role, as `ssoOnly` does (403 otherwise): enabling SCIM lets the
+        provider sign in as any user it adopts in its domains. Switching a connection off
+        does not.
+
+        An audit log entry is created for a change (`ScimConnection`). No webhook event is emitted.
+      operationId: putAdminScimConnection
+      security:
+        - BearerAuth:
+            - identity-providers.write
+      parameters:
+        - $ref: '#/components/parameters/IdentityProviderIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PutScimConnectionRequest'
+      responses:
+        '200':
+          description: The existing connection, updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScimConnection'
+        '201':
+          description: The connection was created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScimConnection'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ScimConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+    delete:
+      tags:
+        - Admin - Identity Provider SCIM
+      summary: Delete a SCIM connection
+      description: |
+        Removes the connection and its tokens. Refused with 409 `scim_users_exist` while it
+        manages any user, a deleted SCIM resource included: unlink them first with
+        `DELETE /v1/admin/users/{id}/scim`. The exclusions of users unlinked from it are
+        deleted with it.
+
+        An audit log entry is created for this action.
+      operationId: deleteAdminScimConnection
+      security:
+        - BearerAuth:
+            - identity-providers.write
+      parameters:
+        - $ref: '#/components/parameters/IdentityProviderIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ScimConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/identity-providers/{id}/scim/tokens:
+    post:
+      tags:
+        - Admin - Identity Provider SCIM
+      summary: Mint a SCIM token
+      description: |
+        Mints a bearer token for the provider's SCIM connection. The value is in this
+        response only; core stores its SHA-256 hash. A token has no expiry. A connection
+        holds at most two unrevoked tokens (409 `scim_token_limit`): revoke one first.
+
+        Needs a caller holding `admin` through a global role (403 otherwise).
+        404 when the provider has no connection.
+
+        An audit log entry is created for this action (`ScimToken`).
+      operationId: createAdminScimToken
+      security:
+        - BearerAuth:
+            - identity-providers.write
+      parameters:
+        - $ref: '#/components/parameters/IdentityProviderIdParam'
+      responses:
+        '201':
+          description: The token, shown once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedScimToken'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '409':
+          $ref: '#/components/responses/ScimConflictResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/identity-providers/{id}/scim/tokens/{tokenId}:
+    delete:
+      tags:
+        - Admin - Identity Provider SCIM
+      summary: Revoke a SCIM token
+      description: |
+        Revokes one token; SCIM calls with it answer 401 from then on. 404 when the
+        token is unknown or already revoked.
+
+        An audit log entry is created for this action (`ScimToken`).
+      operationId: revokeAdminScimToken
+      security:
+        - BearerAuth:
+            - identity-providers.write
+      parameters:
+        - $ref: '#/components/parameters/IdentityProviderIdParam'
+        - name: tokenId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/users/{id}/scim:
+    delete:
+      tags:
+        - Admin - Identity Provider SCIM
+      summary: Unlink a user from SCIM
+      description: |
+        Ends SCIM's management of the user. The user keeps their state, inactive included,
+        and is managed locally from then on. The link stays as an exclusion (its
+        `externalId` cleared): the user is invisible to every SCIM connection, its
+        provider's sign-in no longer claims them, and the IdP cannot adopt them again
+        until an admin calls `PUT /v1/admin/users/{id}/scim/release`. The admin user
+        response then shows `scimExcluded`. 404 when the user is not managed by SCIM or
+        is already unlinked.
+
+        An audit log entry is created for this action (`metadata.action` `scim_unlinked`).
+      operationId: unlinkAdminUserScim
+      security:
+        - BearerAuth:
+            - users.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/users/{id}/scim/release:
+    put:
+      tags:
+        - Admin - Identity Provider SCIM
+      summary: Allow SCIM again for an unlinked user
+      description: |
+        Deletes the exclusion an unlink left. The provider's next SCIM write naming the
+        user adopts them under the normal adoption rules, which gives its sign-in power
+        over the account back, so this needs `admin` through a global role on top of
+        `users.write` (403 otherwise). 404 when the user has no exclusion.
+
+        An audit log entry is created for this action (`metadata.action` `scim_released`,
+        with `scimConnectionId` and `providerId`).
+      operationId: releaseAdminUserScim
+      security:
+        - BearerAuth:
+            - users.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
   /v1/admin/identity-providers/{id}/domains:
     get:
       tags:
@@ -9401,7 +9681,10 @@ paths:
         sign-in at an SSO-only domain is force-linked to the provider. Creating
         a domain SSO-only ends, shortly after and in the background, every
         session of its users who hold an identity at another provider (audited
-        and emitted as `auth.user.sessions-revoked`).
+        and emitted as `auth.user.sessions-revoked`). On a provider with a SCIM
+        connection (active or not), adding a domain needs `admin` through a global
+        role (403 otherwise): the connection adopts and signs in users of the
+        provider's domains.
 
         `roleIds` must be roles that may be assigned within an organization: 400
         `unknown_role` for an unknown, archived or retired role, 400
@@ -9494,7 +9777,9 @@ paths:
         users to (403 `organization_not_permitted`), as on create. Errors are those
         of adding a domain, including 409 `provider_inactive` for `ssoOnly: true` on a
         deactivated provider. Turning `ssoOnly` on or off, or changing the `domain` of
-        an SSO-only domain, needs `admin` through a global role (403 otherwise).
+        an SSO-only domain, needs `admin` through a global role (403 otherwise), as
+        does changing the `domain` of a provider with a SCIM connection. Deleting a
+        domain of such a provider does not.
         A change that makes the domain SSO-only (or renames an SSO-only one)
         ends the sessions of its users who hold an identity at another
         provider, as on create.
@@ -24671,6 +24956,61 @@ components:
           example:
             error: last_sign_in_method
             error_description: This is the account's only way to sign in
+    AdminUserConflictResponse:
+      description: |
+        Conflict. `conflict`: the email is already in use, or the deactivation would
+        leave no active administrator. `managed_by_scim`: the user is managed by an
+        identity provider's SCIM connection and the change touches what it owns (`email`
+        or `name`), or reactivates a user the provider has inactive (or deleted).
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                enum:
+                  - conflict
+                  - managed_by_scim
+              error_description:
+                description: A human-readable explanation of the error
+                type: string
+          example:
+            error: managed_by_scim
+    ScimConflictResponse:
+      description: |
+        Conflict. `scim_users_exist`: the connection still manages users. `scim_token_limit`: the
+        connection already holds two unrevoked tokens. `scim_connection_exists`: a concurrent create won.
+      headers:
+        X-RateLimit-Limit:
+          $ref: '#/components/headers/X-RateLimit-Limit'
+        X-RateLimit-Remaining:
+          $ref: '#/components/headers/X-RateLimit-Remaining'
+        X-RateLimit-Reset:
+          $ref: '#/components/headers/X-RateLimit-Reset'
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+                enum:
+                  - scim_users_exist
+                  - scim_token_limit
+                  - scim_connection_exists
+              error_description:
+                type: string
+          example:
+            error: scim_token_limit
+            error_description: A connection holds at most 2 live tokens; revoke one first
     BrandingBadRequestResponse:
       description: |
         Invalid request. `invalid_request` with `issues` naming each field: a value over its limit, an
@@ -32973,7 +33313,26 @@ components:
         - type: object
           required:
             - managedBy
+            - scimExcluded
           properties:
+            scimExcluded:
+              description: |
+                The provider whose SCIM connection an admin unlinked the user from, or
+                `null`. While set, the user is not managed by SCIM and no connection can
+                see, adopt or sign them in by claim; `PUT /v1/admin/users/{id}/scim/release`
+                (global `admin`) ends it.
+              oneOf:
+                - type: 'null'
+                - type: object
+                  required:
+                    - id
+                    - name
+                  properties:
+                    id:
+                      type: string
+                      format: uuid
+                    name:
+                      type: string
             managedBy:
               description: |
                 What owns an account the admin API will not change, or `null` when
@@ -32981,6 +33340,12 @@ components:
                 `integration` are the account of that service or integration,
                 managed under `/v1/admin/services` or `/v1/admin/integrations`.
                 Updating such a user, its roles, 2FA or identity invites is refused.
+                `scim` is a user an identity provider's SCIM connection manages (`id`
+                and `name` are the provider's): changing its `email` or `name`, or
+                reactivating it while the provider has it inactive, is
+                `409 managed_by_scim`; unlink it with `DELETE /v1/admin/users/{id}/scim`.
+                A SCIM resource the provider deleted still counts as managed; an unlinked
+                user does not (see `scimExcluded`).
               oneOf:
                 - type: 'null'
                 - type: object
@@ -33002,6 +33367,7 @@ components:
                       enum:
                         - service
                         - integration
+                        - scim
                     id:
                       type: string
                       format: uuid
@@ -33515,6 +33881,91 @@ components:
             maxLength: 100
         countsAsMfa:
           type: boolean
+    ScimToken:
+      type: object
+      description: A SCIM token as listed. The value is never returned after minting.
+      required:
+        - id
+        - createdAt
+        - lastUsedAt
+        - revokedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+        revokedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    ScimConnection:
+      type: object
+      description: An identity provider's SCIM connection.
+      required:
+        - id
+        - providerId
+        - baseUrl
+        - isActive
+        - lastUsedAt
+        - managedUserCount
+        - tokens
+      properties:
+        id:
+          type: string
+          format: uuid
+        providerId:
+          type: string
+          format: uuid
+        baseUrl:
+          type: string
+          description: The SCIM base URL to give the identity provider (`PUBLIC_URL` + `/scim/v2`).
+        isActive:
+          type: boolean
+        lastUsedAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+          description: Updated at most once a minute.
+        managedUserCount:
+          type: integer
+          description: Users the connection manages, deleted SCIM resources included and users an admin unlinked left out.
+        tokens:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScimToken'
+    PutScimConnectionRequest:
+      type: object
+      description: Unknown properties are ignored.
+      required:
+        - isActive
+      properties:
+        isActive:
+          type: boolean
+    CreatedScimToken:
+      type: object
+      required:
+        - id
+        - token
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: The bearer token (`scim_…`). Shown once; store it now.
+        createdAt:
+          type: string
+          format: date-time
     IdentityProviderDomain:
       type: object
       description: An email domain claimed by an identity provider
@@ -34831,6 +35282,7 @@ x-tagGroups:
       - Admin - Organization Member Roles
       - Admin - Identity Providers
       - Admin - Identity Provider Domains
+      - Admin - Identity Provider SCIM
       - Admin - Settings
       - Admin - Services
       - Admin - Integrations

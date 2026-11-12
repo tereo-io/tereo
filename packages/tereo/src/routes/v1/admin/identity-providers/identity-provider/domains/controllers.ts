@@ -15,6 +15,7 @@ import {
   validateParams,
 } from "../../../../../../utils/validateReq.js";
 import {
+  assertMayAddScimDomain,
   assertMayAutoAcceptInto,
   assertMayChangeSsoOnly,
   assertProviderActive,
@@ -48,6 +49,8 @@ export const createDomain = async (req: Request, res: Response) => {
   );
 
   const created = await db.$transaction(async (tx) => {
+    await db.identityProviders.lockForUpdate(providerId, tx);
+    await assertMayAddScimDomain(auth, providerId, tx);
     if (body.ssoOnly) {
       await assertProviderActive(providerId, tx);
       await assertMayChangeSsoOnly(auth, tx);

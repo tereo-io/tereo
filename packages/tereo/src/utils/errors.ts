@@ -555,3 +555,13 @@ export class PayloadTooLargeError extends AppError {
     this.name = "PayloadTooLargeError";
   }
 }
+
+export class ManagedByScimError extends AppError {
+  constructor(
+    message = "Managed by the identity provider's SCIM connection; change it there",
+    options: AppErrorOptions = {}
+  ) {
+    super(409, "managed_by_scim", message, options);
+    this.name = "ManagedByScimError";
+  }
+}

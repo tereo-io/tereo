@@ -392,3 +392,60 @@ GroupConflictResponse:
           error_description:
             description: A human-readable explanation of the error
             type: string
+
+ScimConflictResponse:
+  description: |
+    Conflict. `scim_users_exist`: the connection still manages users. `scim_token_limit`: the
+    connection already holds two unrevoked tokens. `scim_connection_exists`: a concurrent create won.
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - scim_users_exist
+              - scim_token_limit
+              - scim_connection_exists
+          error_description:
+            type: string
+      example:
+        error: scim_token_limit
+        error_description: A connection holds at most 2 live tokens; revoke one first
+
+AdminUserConflictResponse:
+  description: |
+    Conflict. `conflict`: the email is already in use, or the deactivation would
+    leave no active administrator. `managed_by_scim`: the user is managed by an
+    identity provider's SCIM connection and the change touches what it owns (`email`
+    or `name`), or reactivates a user the provider has inactive (or deleted).
+  headers:
+    X-RateLimit-Limit:
+      $ref: '../headers.yaml#/X-RateLimit-Limit'
+    X-RateLimit-Remaining:
+      $ref: '../headers.yaml#/X-RateLimit-Remaining'
+    X-RateLimit-Reset:
+      $ref: '../headers.yaml#/X-RateLimit-Reset'
+  content:
+    application/json:
+      schema:
+        type: object
+        properties:
+          error:
+            type: string
+            enum:
+              - conflict
+              - managed_by_scim
+          error_description:
+            description: A human-readable explanation of the error
+            type: string
+      example:
+        error: managed_by_scim

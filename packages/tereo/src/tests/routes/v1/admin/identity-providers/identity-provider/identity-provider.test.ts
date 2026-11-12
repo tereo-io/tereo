@@ -2,7 +2,6 @@
 // @module-tag auth
 
 import { openProviderSecret } from "../../../../../../utils/identityProviders/clientSecret.js";
-import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
 import { generateUniqueId } from "../../../../../support/auth/crypto.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
@@ -12,6 +11,10 @@ import {
   startFakeOidcProvider,
   FakeOidcProvider,
 } from "../../../../../support/fakeOidcProvider.js";
+import {
+  DEFAULT_ORGANIZATION_ID,
+  SYSTEM_USER_ID,
+} from "../../../../../../definitions/index.js";
 import {
   ensureTestOrganization,
   getTestPrincipalToken,
@@ -260,6 +263,71 @@ describe("GET and PATCH /v1/admin/identity-providers/:id, POST /v1/admin/identit
       });
       expect(response.status).toBe(409);
       expect((await response.json()).error).toBe("provider_has_invites");
+    } finally {
+      await other.close();
+    }
+  });
+
+  it("counts a SCIM user who has not signed in through the provider as a pending invite", async () => {
+    const adminToken = await getTestPrincipalToken({ permissions: ["admin"] });
+    // One provider per case: the issuer changes when the case allows it.
+    const scimProvider = async (link: {
+      deletedAt?: Date;
+      unlinkedAt?: Date;
+      identity?: boolean;
+    }) => {
+      const provider = await newProvider();
+      const connection = await prisma.scimConnection.create({
+        data: { providerId: provider.id, createdBy: SYSTEM_USER_ID },
+      });
+      const user = await prisma.user.create({
+        data: { email: `idp-${randomUUID()}@example.com`, name: "Provisioned" },
+      });
+      await prisma.scimUser.create({
+        data: {
+          connectionId: connection.id,
+          userId: user.id,
+          userName: user.email,
+          userNameKey: user.email,
+          idpActive: true,
+          deletedAt: link.deletedAt ?? null,
+          unlinkedAt: link.unlinkedAt ?? null,
+        },
+      });
+      if (link.identity) {
+        await prisma.userIdentity.create({
+          data: { userId: user.id, providerId: provider.id, subject: "s" },
+        });
+      }
+      return provider;
+    };
+    const other = await startFakeOidcProvider();
+    try {
+      const changeIssuer = (id: string) =>
+        call(adminToken, "PATCH", `/${id}`, {
+          issuer: other.issuer,
+          clientId: other.clientId,
+          clientSecret: other.clientSecret,
+        });
+
+      const pending = await changeIssuer((await scimProvider({})).id);
+      expect(pending.status).toBe(409);
+      expect((await pending.json()).error).toBe("provider_has_invites");
+
+      // Signed in: no longer an invite, and the identity rule applies.
+      const signedIn = await changeIssuer(
+        (await scimProvider({ identity: true })).id
+      );
+      expect(signedIn.status).toBe(409);
+      expect((await signedIn.json()).error).toBe("issuer_in_use");
+
+      for (const gone of [
+        { deletedAt: new Date() },
+        { unlinkedAt: new Date() },
+      ]) {
+        const r = await changeIssuer((await scimProvider(gone)).id);
+        expect(r.status, JSON.stringify(gone)).toBe(200);
+      }
     } finally {
       await other.close();
     }

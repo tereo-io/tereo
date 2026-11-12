@@ -26,6 +26,10 @@ const MESSAGES: Record<string, string> = {
     "That is the only way this account can sign in. Connect another provider first, or ask an administrator.",
   sso_required:
     "This account's domain requires the provider, so it can't be disconnected.",
+  scim_users_exist:
+    "SCIM still manages users on this provider. Unlink them first.",
+  scim_token_limit:
+    "Two tokens are already live. Revoke one before generating another.",
 };
 
 /** A readable message for core's `{ error, error_description }`. */

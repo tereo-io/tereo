@@ -4,6 +4,7 @@ import identityInvitesRouter from "./identity-invites/index.js";
 import identitiesRouter from "./identities/index.js";
 import promoteRouter from "./promote/index.js";
 import groupsRouter from "./groups/index.js";
+import scimRouter from "./scim/index.js";
 import totpRouter from "./totp/index.js";
 import { Router } from "express";
 import {
@@ -25,6 +26,7 @@ userRouter.use("/identities", identitiesRouter);
 userRouter.use("/identity-invites", identityInvitesRouter);
 userRouter.use("/email-verification", emailVerificationRouter);
 userRouter.use("/promote", promoteRouter);
+userRouter.use("/scim", scimRouter);
 
 userRouter.delete(
   "/sessions/all",

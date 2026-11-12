@@ -48,6 +48,8 @@ describe("isReservedPath", () => {
     "/assets/x.js",
     "/V1",
     "/OAuth/token",
+    "/scim/v2/Users",
+    "/SCIM",
   ])("reserves %s for core", (path) => expect(isReservedPath(path)).toBe(true));
 
   it.each([

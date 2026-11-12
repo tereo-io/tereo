@@ -483,6 +483,15 @@ from 10s) for the users that failed only, since ending a user's sessions again w
 sessions they have started since. When the job cannot be enqueued (Redis unreachable) the sweep runs
 in the request instead, once.
 
+**A SCIM connection grants the same power.** It lets the provider sign in as any user it adopts in its
+domains, a platform admin included, by `oid` or verified email. So creating or re-enabling a
+connection and minting its token need `admin` through a global role on top of
+`identity-providers.write` (403 otherwise). Once a provider has a connection (active or not), so do
+the changes that would hand that power to someone else: changing its `issuer`, `clientId` or client
+secret, adding a domain or renaming one, and activating the provider (which resumes the connection);
+an issuer change is also refused while a SCIM user who has not yet signed in through the provider
+exists, as for a pending invite. See [scim.md](scim.md#trust).
+
 A domain's `autoAccept` only matches the provider that owns the domain. A user with a matching
 email who already exists is never signed in by it: see _No matching by email_ below.
 
@@ -497,19 +506,29 @@ never carry `hd`, cannot be auto-accepted: those users can arrive only by **invi
 ### No matching by email
 
 A provider identity (the pair of provider and the provider's stable `sub`) is **never matched to an
-existing account by email**. A first sign-in lands in exactly one of three ways, tried in order:
+existing account by email**, with one exception: the SCIM claim in step 2, which finds a user the
+provider's own SCIM connection manages ([scim.md](scim.md)). A first sign-in lands in exactly one of
+four ways, tried in order:
 
 1. The identity is already linked: it signs in that user, unless the user's email domain is SSO-only
    for another provider (below).
-2. An unexpired **invite** exists for that provider, the invited user's email equals the provider's
+2. The provider's active **SCIM connection** manages exactly one user it matches, by Entra's `oid`
+   equal to the SCIM `externalId` (only from an issuer exactly
+   `https://login.microsoftonline.com/<tenant-guid>/v2.0`), or else by a verified email (the invite rule,
+   `hd` included) equal to the user's own. A deleted SCIM resource, or a user who already has an
+   identity at the provider, is not claimed; several matches claim none; a deactivated or expired
+   user is refused and not linked. An unverified email with no `oid` falls through to the answers
+   below. The identity is linked, audited with `via: "scim"`.
+3. An unexpired **invite** exists for that provider, the invited user's email equals the provider's
    verified email (and `hd`, for Google): the invite is claimed, once, and the identity linked.
-3. The email's domain is an `autoAccept` domain of this provider and no account has that email: a new
+4. The email's domain is an `autoAccept` domain of this provider and no account has that email: a new
    user is created. If an account already has the email, the sign-in is refused with
    `account_exists`.
 
 Otherwise it is refused with `no_account`. This is deliberate: a provider that lets people choose
 unverified or recycled email addresses must not be able to take over a core account. A user links a
-provider to an existing account only from the account page while signed in, or through an invite.
+provider to an existing account only from the account page while signed in, through an invite, or,
+for a user the provider's SCIM connection manages, by the SCIM claim.
 The user's email in core is not updated from the provider.
 
 ### Invites

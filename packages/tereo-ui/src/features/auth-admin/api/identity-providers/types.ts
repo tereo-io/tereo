@@ -65,3 +65,27 @@ export interface UserIdentities {
   identities: ConnectedIdentity[];
   invites: IdentityInvite[];
 }
+
+export interface ScimToken {
+  id: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface ScimConnection {
+  id: string;
+  providerId: string;
+  baseUrl: string;
+  isActive: boolean;
+  lastUsedAt: string | null;
+  managedUserCount: number;
+  tokens: ScimToken[];
+}
+
+/** `token` is returned once, when it is minted. */
+export interface NewScimToken {
+  id: string;
+  token: string;
+  createdAt: string;
+}

@@ -1,13 +1,14 @@
 // @module-tag int
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
+import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
 import { describe, it, expect, beforeAll, beforeEach, afterAll } from "vitest";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createGuest, issue } from "../../../../../support/passwordSetup.js";
 import { issueVerifyLinkFor } from "../../../../../support/verifyLink.js";
+import { createScimConnection } from "../../../../../support/scim.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { waitFor } from "../../../../../support/webhooks.js";
 import { fetchJson } from "../../../../../support/http.js";
 import env from "../../../../../../env.js";
 import { randomUUID } from "node:crypto";
@@ -31,6 +32,16 @@ import {
   createTestRole,
   createTestUser,
 } from "../../../../../support/auth/users.js";
+import {
+  activeState,
+  managedWith,
+  tag,
+} from "../../../../../support/scimUsers.js";
+import {
+  createTestWebhookEndpoint,
+  getCoreEventSubscriberToken,
+  waitFor,
+} from "../../../../../support/webhooks.js";
 
 const patch = (id: string, token: string, body: unknown) =>
   fetchJson("PATCH", `${BASE_URL}/v1/admin/users/${id}`, token, body);
@@ -280,4 +291,197 @@ describe("PATCH /v1/admin/users/:id and email verification", () => {
       }
     }
   );
+});
+
+describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
+  let writer: string;
+
+  beforeAll(async () => {
+    writer = await getTestPrincipalToken({
+      permissions: ["users.read", "users.write"],
+    });
+  });
+
+  const scimUser = async (
+    link: { idpActive?: boolean; adminHold?: boolean; deletedAt?: Date } = {}
+  ) => {
+    const c = await createScimConnection();
+    const { id } = await managedWith(c, link);
+    return await prisma.user.update({
+      where: { id },
+      data: { firstName: "Jane", lastName: "Doe" },
+    });
+  };
+
+  const expectManaged = (r: { status: number; body: unknown }) => {
+    expect(r.status).toBe(409);
+    expect(r.body).toMatchObject({ error: "managed_by_scim" });
+  };
+
+  it.each([
+    ["name", { name: "Someone Else" }],
+    ["email", { email: `moved-${tag()}@elsewhere.test` }],
+  ])("refuses a change to %s with 409 managed_by_scim", async (_, body) => {
+    const user = await scimUser();
+    expectManaged(await patch(user.id, writer, body));
+    expect(
+      await prisma.user.findUniqueOrThrow({ where: { id: user.id } })
+    ).toEqual(user);
+  });
+
+  it("refuses a profile change while the link is deleted", async () => {
+    const user = await scimUser({ idpActive: false, deletedAt: new Date() });
+    expectManaged(await patch(user.id, writer, { name: "Taken Back" }));
+  });
+
+  it("accepts a body repeating the current profile", async () => {
+    const user = await scimUser();
+    const r = await patch(user.id, writer, {
+      name: user.name,
+      email: user.email,
+    });
+    expect(r.status).toBe(200);
+  });
+
+  it("deactivates and sets the admin hold", async () => {
+    const user = await scimUser();
+    const r = await patch(user.id, writer, { isActive: false });
+    expect(r.status).toBe(200);
+    expect(r.body.isActive).toBe(false);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: true,
+      adminHold: true,
+    });
+  });
+
+  it.each([
+    ["without a hold", { idpActive: false }],
+    ["under a hold", { idpActive: false, adminHold: true }],
+  ])(
+    "refuses a reactivation while the IdP has the user inactive (%s)",
+    async (_, link) => {
+      const user = await scimUser(link);
+      const before = await activeState(user.id);
+      expectManaged(await patch(user.id, writer, { isActive: true }));
+      expect(await activeState(user.id)).toEqual(before);
+    }
+  );
+
+  it("refuses reactivating a user the IdP deleted, pointing at re-assigning or unlinking", async () => {
+    const user = await scimUser({ idpActive: false, deletedAt: new Date() });
+    const r = await patch(user.id, writer, { isActive: true });
+    expectManaged(r);
+    expect(r.body.error_description).toMatch(
+      /removed by the identity provider/i
+    );
+    expect(r.body.error_description).toMatch(/unlink/i);
+    expect(r.body.error_description).not.toMatch(/reactivate them there/i);
+  });
+
+  it("reactivates a held user the IdP has active and clears the hold", async () => {
+    const user = await scimUser({ adminHold: true });
+    const r = await patch(user.id, writer, { isActive: true });
+    expect(r.status).toBe(200);
+    expect(r.body.isActive).toBe(true);
+    expect(await activeState(user.id)).toEqual({
+      isActive: true,
+      idpActive: true,
+      adminHold: false,
+    });
+  });
+
+  it("holds an IdP-deactivated user with a password reset: the reset audits and emits alone", async () => {
+    const user = await scimUser({ idpActive: false });
+    const r = await patch(user.id, writer, {
+      isActive: false,
+      password: "Another-Passw0rd!",
+    });
+    expect(r.status).toBe(200);
+    expect(await activeState(user.id)).toEqual({
+      isActive: false,
+      idpActive: false,
+      adminHold: true,
+    });
+    const entries = await prisma.auditLogEntry.findMany({
+      where: { entityType: "User", entityId: user.id },
+    });
+    expect(entries.map((e) => e.metadata)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "scim_admin_hold" }),
+        expect.objectContaining({ passwordReset: true }),
+      ])
+    );
+    expect(entries).toHaveLength(2);
+  });
+
+  it("an unmanaged inactive user's isActive:false still writes its no-change entry and event", async () => {
+    const endpoint = await createTestWebhookEndpoint(
+      await getCoreEventSubscriberToken(DEFAULT_ORGANIZATION_ID),
+      { eventTypes: ["auth.user.updated"] }
+    );
+    const user = await createTestUser({ isActive: false });
+    const entries = () =>
+      prisma.auditLogEntry.findMany({
+        where: { entityType: "User", entityId: user.id },
+      });
+    const before = await entries();
+
+    const r = await patch(user.id, writer, { isActive: false });
+    expect(r.status).toBe(200);
+    expect(r.body.isActive).toBe(false);
+    const seen = new Set(before.map((e) => e.id));
+    const written = (await entries()).filter((e) => !seen.has(e.id));
+    expect(written).toHaveLength(1);
+    expect(written[0]).toMatchObject({
+      action: "UPDATE",
+      changes: null,
+      metadata: null,
+    });
+
+    // Deliveries fan out in emission order: once the rename's is in, the
+    // no-change request's is too.
+    const later = `Renamed ${user.id}`;
+    expect((await patch(user.id, writer, { name: later })).status).toBe(200);
+    const deliveries = () =>
+      prisma.webhookDelivery.findMany({
+        where: {
+          webhookEndpointId: endpoint.id,
+          eventType: "auth.user.updated",
+          payload: { path: ["entityId"], equals: user.id },
+        },
+      });
+    await waitFor(
+      async () =>
+        (await deliveries()).some((d) =>
+          JSON.stringify(d.payload).includes(later)
+        ),
+      10_000
+    );
+    const delivered = (await deliveries()).map((d) => d.payload);
+    expect(delivered).toHaveLength(2);
+    expect(delivered).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          data: expect.objectContaining({ isActive: false, name: user.name }),
+        }),
+        expect.objectContaining({
+          data: expect.objectContaining({ isActive: false, name: later }),
+        }),
+      ])
+    );
+  });
+
+  it("changes the rate limit and the password", async () => {
+    const user = await scimUser();
+    const limited = await patch(user.id, writer, { rateLimitPerSecond: 7 });
+    expect(limited.status).toBe(200);
+    expect(limited.body.rateLimitPerSecond).toBe(7);
+    const reset = await patch(user.id, writer, {
+      password: "Another-Passw0rd!",
+    });
+    expect(reset.status).toBe(200);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    expect(row.passwordHash).not.toBeNull();
+  });
 });
