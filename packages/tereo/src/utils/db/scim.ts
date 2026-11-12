@@ -36,6 +36,20 @@ export const lockConnection = async (id: string, tx: Tx) => {
   return await tx.scimConnection.findUniqueOrThrow({ where: { id } });
 };
 
+/**
+ * Serializes writers to one connection's groups. `FOR NO KEY UPDATE`, not
+ * `lockConnection`'s `FOR UPDATE`: a SCIM user write inserts a `scim_users`
+ * row, which takes `FOR KEY SHARE` on the connection and must not queue behind
+ * a group write that waits on locks the user write holds.
+ */
+export const lockConnectionForGroups = async (id: string, tx: Tx) => {
+  const locked = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "auth"."scim_connections" WHERE "id" = ${id}::uuid FOR NO KEY UPDATE
+  `;
+  if (locked.length === 0) throw new NotFoundError("SCIM connection not found");
+  return await tx.scimConnection.findUniqueOrThrow({ where: { id } });
+};
+
 export const createConnection = async (
   input: { providerId: string; createdBy: string },
   tx: Tx

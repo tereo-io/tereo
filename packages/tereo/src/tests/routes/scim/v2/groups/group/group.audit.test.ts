@@ -130,4 +130,45 @@ describe("SCIM group change audit and events", () => {
       detail: "members_added",
     });
   });
+
+  it("an identical PUT on a group with a recorded skip and an unknown id writes nothing", async () => {
+    const c = await orgConnection();
+    const member = await managedUser(c);
+    const outsider = await managedUser(c, { inOrg: false });
+    const body = {
+      displayName: `Same ${tag()}`,
+      members: asMembers(member.id, outsider.id, randomUUID()),
+    };
+    const pushed = await pushGroup(c.token, body);
+    const id = pushed.body.id;
+    const audit = await groupAuditActions(id);
+    const events = await groupEventCount(id);
+
+    const r = await putGroup(c.token, id, body);
+    expect(r.status).toBe(200);
+    expect(await groupAuditActions(id)).toEqual(audit);
+    expect(await groupEventCount(id)).toBe(events);
+    expect(r.body.meta.lastModified).toBe(pushed.body.meta.lastModified);
+  });
+
+  it("writes members_skipped when a request changes the recorded skips and adds nobody", async () => {
+    const c = await orgConnection();
+    const outsider = await managedUser(c, { inOrg: false });
+    const pushed = await pushGroup(c.token, { displayName: `Ch ${tag()}` });
+    const id = pushed.body.id;
+    await patchGroup(
+      c.token,
+      id,
+      patchOps({ op: "add", path: "members", value: asMembers(outsider.id) })
+    );
+    await patchGroup(
+      c.token,
+      id,
+      patchOps({
+        op: "remove",
+        path: `members[value eq "${outsider.id}"]`,
+      })
+    );
+    expect(await entries(id, "members_skipped")).toHaveLength(2);
+  });
 });

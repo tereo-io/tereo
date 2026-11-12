@@ -4,9 +4,7 @@
 import { holdLocks, waitForLockWait } from "../../../../../support/dbLocks.js";
 import { removeFromOrgGroupsTx } from "../../../../../../utils/groups.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
-import { pushGroup, scimFetch } from "../../../../../support/scim.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
-import { tag } from "../../../../../support/scimUsers.js";
 import db from "../../../../../../utils/db/index.js";
 import { describe, expect, it } from "vitest";
 import {
@@ -19,7 +17,19 @@ import {
   patchOps,
   putGroup,
   skippedIds,
+  waitForAuthorityLockWait,
 } from "../../../../../support/scimGroups.js";
+import {
+  makeUser,
+  managedWith,
+  tag,
+} from "../../../../../support/scimUsers.js";
+import {
+  createScimConnection,
+  pushGroup,
+  scimFetch,
+  setGroupsTarget,
+} from "../../../../../support/scim.js";
 
 const sorted = (ids: string[]) => [...ids].sort();
 
@@ -138,5 +148,104 @@ describe("SCIM group changes racing", { tags: ["race"] }, () => {
       expect(group.scimLink).toBeNull();
       expect(group.membershipSource).toBe("local");
     }
+  });
+
+  it("a member removal in a global group does not deadlock with a SCIM user write that adopts and deactivates a user", async () => {
+    const c = await createScimConnection();
+    await setGroupsTarget(c.connectionId, { kind: "global" });
+    for (let round = 0; round < 3; round++) {
+      const member = await managedWith(c);
+      const free = await makeUser(`free-${tag()}@${c.domain}`);
+      const pushed = await pushGroup(c.token, {
+        displayName: `Gl ${tag()}`,
+        members: asMembers(member.id),
+      });
+      // The user write queues first on the administrator guard, so it holds
+      // that lock when it reaches the connection row; the group write is
+      // queued behind it with the connection row already taken.
+      const release = await holdLocks(
+        (tx) =>
+          tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('core:admin-remains', 0))`
+      );
+      let responses;
+      try {
+        const userWrite = scimFetch(
+          c.token,
+          "PUT",
+          `/scim/v2/Users/${free.id}`,
+          {
+            schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            userName: free.email,
+            active: false,
+            emails: [{ primary: true, value: free.email }],
+            name: { givenName: "Free", familyName: "User" },
+          }
+        );
+        await waitForLockWait("%core:admin-remains%", 10_000, 1);
+        const groupWrite = patchGroup(
+          c.token,
+          pushed.body.id,
+          patchOps({
+            op: "remove",
+            path: `members[value eq "${member.id}"]`,
+          })
+        );
+        await waitForLockWait("%core:admin-remains%", 10_000, 2);
+        responses = Promise.all([userWrite, groupWrite]);
+      } finally {
+        await release();
+      }
+      const [user, group] = await responses;
+      expect(user.status, JSON.stringify(user.body)).toBeLessThan(500);
+      expect(group.status, JSON.stringify(group.body)).toBe(200);
+    }
+  });
+
+  it("a directory removal beats a skip record an organization removal wrote while it waited", async () => {
+    const c = await orgConnection();
+    const user = await managedUser(c);
+    const other = await managedUser(c);
+    const pushed = await pushGroup(c.token, {
+      displayName: `Rm ${tag()}`,
+      members: asMembers(user.id),
+    });
+    const id = pushed.body.id;
+
+    const release = await holdLocks(async (tx) => {
+      await db.users.lockAuthority(user.id, tx);
+      await tx.organizationMember.deleteMany({
+        where: { organizationId: c.organizationId, userId: user.id },
+      });
+      await removeFromOrgGroupsTx(
+        tx,
+        { userId: SYSTEM_USER_ID, email: null },
+        c.organizationId,
+        user.id
+      );
+    });
+    let patching;
+    try {
+      patching = patchGroup(
+        c.token,
+        id,
+        patchOps({ op: "remove", path: `members[value eq "${user.id}"]` })
+      );
+      await waitForAuthorityLockWait(user.id);
+    } finally {
+      await release();
+    }
+    expect((await patching).status).toBe(200);
+    expect(await memberIds(id)).toEqual([]);
+    expect(await skippedIds(id)).toEqual([]);
+
+    await prisma.organizationMember.create({
+      data: { organizationId: c.organizationId, userId: user.id },
+    });
+    const next = await patchGroup(
+      c.token,
+      id,
+      patchOps({ op: "add", path: "members", value: asMembers(other.id) })
+    );
+    expect(bodyMemberIds(next.body)).toEqual([other.id]);
   });
 });

@@ -211,11 +211,14 @@ describe("scim mode", () => {
     expect(result.dropped).toBe(1);
   });
 
-  it("scim add with nothing to add audits the skipped and dropped counts and emits no event", async () => {
+  it("scim add with nothing to add reports the skipped and dropped counts, writes no entry and emits no event", async () => {
     const group = await pushedGroup(c);
     const outsider = await managedWith(c);
     const before = await prisma.outbox.count({
       where: { payload: { path: ["entityId"], equals: group.id } },
+    });
+    const entries = await prisma.auditLogEntry.count({
+      where: { entityType: "Group", entityId: group.id },
     });
 
     const result = await run((tx) =>
@@ -223,14 +226,13 @@ describe("scim mode", () => {
     );
 
     expect(result.added).toEqual([]);
-    const entry = await lastAudit(group.id);
-    expect(entry.userId).toBe(SYSTEM_USER_ID);
-    expect(entry.metadata).toMatchObject({
-      action: "members_skipped",
-      scimConnectionId: c.connectionId,
-      skipped: 1,
-      dropped: 1,
-    });
+    expect(result.skipped).toEqual([outsider.id]);
+    expect(result.dropped).toBe(1);
+    expect(
+      await prisma.auditLogEntry.count({
+        where: { entityType: "Group", entityId: group.id },
+      })
+    ).toBe(entries);
     expect(
       await prisma.outbox.count({
         where: { payload: { path: ["entityId"], equals: group.id } },

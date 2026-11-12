@@ -178,11 +178,12 @@ export const setSkipped = async (
   tx: Tx,
   seen?: string[]
 ) => {
+  const keep = new Set(userIds);
   await tx.scimGroupSkippedMember.deleteMany({
     where: {
       scimGroupId,
       userId: seen
-        ? { in: seen.filter((id) => !userIds.includes(id)) }
+        ? { in: seen.filter((id) => !keep.has(id)) }
         : { notIn: userIds },
     },
   });

@@ -14,6 +14,8 @@ import {
   patchOps,
   putGroup,
   seedMembers,
+  seedUsers,
+  skippedIds,
 } from "../../../../../support/scimGroups.js";
 
 const addedBy = async (groupId: string) =>
@@ -145,5 +147,56 @@ describe("SCIM group member limits", () => {
         patchOps({ op: "add", path: "members", value: members })
       )
     );
+  });
+
+  it("retries recorded skips only within the budget the request leaves, keeping the rest recorded", async () => {
+    const c = await orgConnection();
+    const member = await managedUser(c);
+    const pushed = await pushGroup(c.token, { displayName: `Rec ${tag()}` });
+    const id = pushed.body.id;
+    const link = await prisma.scimGroup.findUniqueOrThrow({
+      where: { groupId: id },
+    });
+    const recorded = await seedUsers(1005);
+    await prisma.scimGroupSkippedMember.createMany({
+      data: recorded.map((userId) => ({
+        scimGroupId: link.id,
+        userId,
+        reason: "not_org_member",
+      })),
+    });
+
+    const r = await patchGroup(
+      c.token,
+      id,
+      patchOps({ op: "add", path: "members", value: asMembers(member.id) })
+    );
+    expect(r.status).toBe(200);
+    expect(await memberIds(id)).toEqual([member.id]);
+    // 999 retried (the lowest ids; unmanaged users, so dropped), 6 untouched.
+    expect(await skippedIds(id)).toEqual(recorded.slice(999));
+  });
+
+  it("deletes a recorded skip the request omits, even past the budget", async () => {
+    const c = await orgConnection();
+    const pushed = await pushGroup(c.token, { displayName: `Om ${tag()}` });
+    const id = pushed.body.id;
+    const link = await prisma.scimGroup.findUniqueOrThrow({
+      where: { groupId: id },
+    });
+    const recorded = await seedUsers(1005);
+    await prisma.scimGroupSkippedMember.createMany({
+      data: recorded.map((userId) => ({
+        scimGroupId: link.id,
+        userId,
+        reason: "not_org_member",
+      })),
+    });
+    const r = await putGroup(c.token, id, {
+      displayName: pushed.body.displayName,
+      members: [],
+    });
+    expect(r.status).toBe(200);
+    expect(await skippedIds(id)).toEqual([]);
   });
 });

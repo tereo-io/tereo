@@ -145,6 +145,8 @@ export const normaliseGroupPatch = (
 export interface GroupChangePlan {
   /** The member set the request leaves, as UUID-shaped ids. */
   desired: Set<string>;
+  /** Of `desired`, the ids the request itself names (an add or a replace); the rest are recorded skips carried over. */
+  named: Set<string>;
   touchesMembers: boolean;
   displayName?: string;
   /** Undefined leaves it as it is. */
@@ -169,20 +171,29 @@ export const resolveGroupOps = (
   );
   let desired = new Set(current);
   if (touchesMembers) for (const id of recorded) desired.add(id);
-  const plan: GroupChangePlan = { desired, touchesMembers };
+  let named = new Set<string>();
+  const plan: GroupChangePlan = { desired, named, touchesMembers };
   for (const op of ops) {
     switch (op.kind) {
       case "addMembers":
-        for (const id of uuids(op.values)) desired.add(id);
+        for (const id of uuids(op.values)) {
+          desired.add(id);
+          named.add(id);
+        }
         break;
       case "removeMembers":
-        for (const id of uuids(op.values)) desired.delete(id);
+        for (const id of uuids(op.values)) {
+          desired.delete(id);
+          named.delete(id);
+        }
         break;
       case "clearMembers":
         desired.clear();
+        named.clear();
         break;
       case "replaceMembers":
         desired = new Set(uuids(op.values));
+        named = new Set(desired);
         break;
       case "displayName":
         plan.displayName = op.value;
@@ -193,5 +204,6 @@ export const resolveGroupOps = (
     }
   }
   plan.desired = desired;
+  plan.named = named;
   return plan;
 };

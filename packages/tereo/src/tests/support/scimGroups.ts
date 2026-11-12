@@ -80,12 +80,8 @@ export const groupEventCount = (groupId: string) =>
     where: { payload: { path: ["entityId"], equals: groupId } },
   });
 
-/** Inserts `count` plain users as members of the group directly, without requests. */
-export const seedMembers = async (
-  groupId: string,
-  count: number,
-  addedBy: string
-): Promise<string[]> => {
+/** Inserts `count` plain users directly; returns their ids, ascending. */
+export const seedUsers = async (count: number): Promise<string[]> => {
   const batch = tag();
   await prisma.user.createMany({
     data: Array.from({ length: count }, (_, i) => ({
@@ -98,9 +94,36 @@ export const seedMembers = async (
     where: { email: { startsWith: `bulk-${batch}-` } },
     select: { id: true },
   });
-  const ids = users.map((u) => u.id);
+  return users.map((u) => u.id).sort();
+};
+
+/** Inserts `count` plain users as members of the group directly, without requests. */
+export const seedMembers = async (
+  groupId: string,
+  count: number,
+  addedBy: string
+): Promise<string[]> => {
+  const ids = await seedUsers(count);
   await prisma.groupMember.createMany({
     data: ids.map((userId) => ({ groupId, userId, addedBy })),
   });
-  return ids.sort();
+  return ids;
+};
+
+/** Resolves once a session waits on the authority lock of `userId`. */
+export const waitForAuthorityLockWait = async (
+  userId: string,
+  timeoutMs = 10_000
+) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const [row] = await prisma.$queryRaw<{ n: bigint }[]>`
+      SELECT count(*)::bigint AS n FROM pg_locks
+      WHERE locktype = 'advisory' AND NOT granted
+        AND ((classid::bigint << 32) | objid::bigint) =
+          hashtextextended(${`core:user-authority:${userId}`}, 0)`;
+    if (Number(row.n) > 0) return;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error(`No session waited on the authority lock of ${userId}`);
 };

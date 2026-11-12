@@ -85,29 +85,39 @@ interface MemberDiff {
   toRemove: string[];
 }
 
-/** What turns `current` into `desired`; the caps count these, not the request. */
-const diffMembers = (current: string[], desired: Set<string>): MemberDiff => {
+/**
+ * What turns `current` into `desired`. The caps apply to what the request
+ * itself names first; recorded skips it does not name are then retried within
+ * the budget left, lowest id first, and the rest stay recorded.
+ */
+const diffMembers = (
+  current: string[],
+  desired: Set<string>,
+  named: Set<string>
+): MemberDiff => {
   const have = new Set(current);
-  const diff = {
-    toAdd: [...desired].filter((id) => !have.has(id)).sort(),
-    toRemove: current.filter((id) => !desired.has(id)).sort(),
-  };
-  if (diff.toAdd.length + diff.toRemove.length > MAX_MEMBER_CHANGES) {
+  const toRemove = current.filter((id) => !desired.has(id)).sort();
+  const pending = [...desired].filter((id) => !have.has(id)).sort();
+  const toAdd = pending.filter((id) => named.has(id));
+  if (toAdd.length + toRemove.length > MAX_MEMBER_CHANGES) {
     throw new BadRequestError(
       "tooMany",
       `A request changes at most ${MAX_MEMBER_CHANGES} memberships`
     );
   }
-  if (
-    current.length - diff.toRemove.length + diff.toAdd.length >
-    MAX_GROUP_MEMBERS
-  ) {
+  const size = current.length - toRemove.length + toAdd.length;
+  if (size > MAX_GROUP_MEMBERS) {
     throw new BadRequestError(
       "tooMany",
       `A group holds at most ${MAX_GROUP_MEMBERS} members`
     );
   }
-  return diff;
+  const room = Math.min(
+    MAX_MEMBER_CHANGES - toAdd.length - toRemove.length,
+    MAX_GROUP_MEMBERS - size
+  );
+  const retried = pending.filter((id) => !named.has(id)).slice(0, room);
+  return { toAdd: [...toAdd, ...retried], toRemove };
 };
 
 const assertRequestSize = (values: string[]) => {
@@ -127,13 +137,24 @@ interface MemberOutcome {
   membersChanged: boolean;
 }
 
-/** Removes, then adds, and records exactly the members `addMembers` skipped. */
+interface SkipState {
+  /** The group's skip records, read under the locks. */
+  recorded: string[];
+  desired: Set<string>;
+}
+
+/**
+ * Removes, then adds, and settles the skip records: those the request retried
+ * or dropped from the desired set are replaced by exactly what `addMembers`
+ * skipped; the others stay. A `members_skipped` entry is written only when
+ * nobody was added and the records changed.
+ */
 const applyDiff = async (
   tx: Tx,
   ctx: ScimContext,
   link: ScimGroupLink,
   { toAdd, toRemove }: MemberDiff,
-  recorded: string[]
+  state: SkipState
 ): Promise<MemberOutcome> => {
   const changes: GroupChange[] = [];
   let membersChanged = false;
@@ -148,19 +169,52 @@ const applyDiff = async (
     membersChanged ||= removed.removed.length > 0;
   }
   let skipped: string[] = [];
+  let added: string[] = [];
+  let dropped = 0;
   if (toAdd.length > 0) {
-    const added = await addMembers(actorOf(ctx), link.groupId, toAdd, tx);
-    changes.push(added);
-    membersChanged ||= added.added.length > 0;
-    skipped = added.skipped;
+    const result = await addMembers(actorOf(ctx), link.groupId, toAdd, tx);
+    changes.push(result);
+    added = result.added;
+    membersChanged ||= added.length > 0;
+    skipped = result.skipped;
+    dropped = result.dropped;
   }
+  const retried = new Set(toAdd);
+  const resolved = state.recorded.filter(
+    (id) => !state.desired.has(id) || retried.has(id)
+  );
   await db.scimGroups.setSkipped(
     link.id,
     skipped,
     "not_org_member",
     tx,
-    recorded
+    resolved
   );
+  const gone = new Set(resolved);
+  const after = new Set([
+    ...state.recorded.filter((id) => !gone.has(id)),
+    ...skipped,
+  ]);
+  const before = new Set(state.recorded);
+  const recordsChanged =
+    after.size !== before.size || [...after].some((id) => !before.has(id));
+  if (added.length === 0 && recordsChanged) {
+    const group = await db.groups.getAny(link.groupId, tx);
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      organizationId: group.organizationId,
+      action: "UPDATE",
+      entityType: "Group",
+      entityId: group.id,
+      entityName: group.slug,
+      metadata: {
+        action: "members_skipped",
+        scimConnectionId: ctx.connection.id,
+        skipped: skipped.length,
+        dropped,
+      },
+    });
+  }
   return { changes, membersChanged };
 };
 
@@ -174,7 +228,10 @@ export const createScimGroup = async (
     const slug = n === 1 ? base : withSlugSuffix(base, n);
     try {
       const { view, changes } = await db.$transaction(async (tx) => {
-        const connection = await db.scim.lockConnection(ctx.connection.id, tx);
+        const connection = await db.scim.lockConnectionForGroups(
+          ctx.connection.id,
+          tx
+        );
         requireEnabled(connection.groupsTarget);
         const created = await createGroup(
           actorOf(ctx),
@@ -198,8 +255,12 @@ export const createScimGroup = async (
           tx
         );
         assertRequestSize(input.members);
-        const diff = diffMembers([], uuidSet(input.members));
-        const applied = await applyDiff(tx, ctx, link, diff, []);
+        const wanted = uuidSet(input.members);
+        const diff = diffMembers([], wanted, wanted);
+        const applied = await applyDiff(tx, ctx, link, diff, {
+          recorded: [],
+          desired: wanted,
+        });
         return {
           view: {
             link: await findLink(ctx, created.group.id, tx),
@@ -331,13 +392,16 @@ const changeScimGroup = async (
     return await getScimGroup(ctx, groupId, { members: true });
   }
   const { view, changes } = await db.$transaction(async (tx) => {
-    const connection = await db.scim.lockConnection(ctx.connection.id, tx);
+    const connection = await db.scim.lockConnectionForGroups(
+      ctx.connection.id,
+      tx
+    );
     requireEnabled(connection.groupsTarget);
     const link = await findLink(ctx, groupId, tx);
     const current = await db.groups.getMemberIds(link.groupId, tx);
     const recorded = await db.scimGroups.listSkippedIds(link.id, tx);
     const plan = resolveGroupOps(ops, current, recorded);
-    const diff = diffMembers(current, plan.desired);
+    const diff = diffMembers(current, plan.desired, plan.named);
 
     await lockMemberAuthorities([...diff.toAdd, ...diff.toRemove], tx);
     await db.groups.lockGroup(link.groupId, tx);
@@ -346,7 +410,10 @@ const changeScimGroup = async (
     const before = await db.groups.getAny(link.groupId, tx);
 
     const applied = plan.touchesMembers
-      ? await applyDiff(tx, ctx, locked, diff, recorded)
+      ? await applyDiff(tx, ctx, locked, diff, {
+          recorded: await db.scimGroups.listSkippedIds(locked.id, tx),
+          desired: plan.desired,
+        })
       : { changes: [], membersChanged: false };
     const changes: GroupChange[] = [...applied.changes];
     if (plan.displayName !== undefined && plan.displayName !== before.name) {

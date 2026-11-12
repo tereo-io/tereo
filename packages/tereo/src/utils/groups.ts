@@ -627,21 +627,6 @@ export const addMembers = async (
       ...(dropped > 0 && { dropped }),
     });
     await emitMembersEvents(tx, group, "auth.group.members-added", added);
-  } else if (actor.mode === "scim" && skipped.length + dropped > 0) {
-    await logAuditTx(tx, {
-      auth: auditActor(actor),
-      organizationId: group.organizationId,
-      action: "UPDATE",
-      entityType: "Group",
-      entityId: group.id,
-      entityName: group.slug,
-      metadata: {
-        action: "members_skipped",
-        ...scimDetail(actor),
-        skipped: skipped.length,
-        dropped,
-      },
-    });
   }
   return {
     group,
