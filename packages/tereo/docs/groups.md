@@ -90,6 +90,10 @@ global roles only). A caller needs:
 | Create, edit, add or remove members, set roles | `groups.write` |
 | Archive, restore | `groups.archive` |
 
+An app service reads groups by requesting the core role `group_resolver` (`groups.read`) in its
+provisioning document's `access.roles` ([registry](registry.md#access)); `user_resolver`
+(`users.read`) lists a user's groups (`GET /v1/admin/users/:id/groups`) but not a group by id.
+
 Without the permission, an **admin or owner of the group's organization** may do the same for that
 organization's groups, including reading them (and listing them with `?organizationId=<their org>`).
 So may a holder of the platform `organizations.write`, which covers every organization as it does on

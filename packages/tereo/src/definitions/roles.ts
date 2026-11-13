@@ -44,6 +44,14 @@ export const ROLES: RoleDefinition[] = [
     permissions: ["users.read"],
   },
   {
+    name: "group_resolver",
+    requestable: true,
+    displayName: "Group Resolver",
+    description:
+      "Allows a backend service account to resolve groups (name, organization, whether one exists)",
+    permissions: ["groups.read"],
+  },
+  {
     name: "platform_admin",
     displayName: "Platform Administrator",
     description:

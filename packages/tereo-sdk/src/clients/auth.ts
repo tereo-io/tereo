@@ -381,8 +381,8 @@ export class AuthServiceClient {
 
   /**
    * A group by id, archived or not. Null when core answers 404. Needs
-   * `groups.read`: without it core answers 403 for every id, existing or
-   * not. Not cached.
+   * `groups.read` (the `group_resolver` role): without it core answers 403
+   * for every id, existing or not. Not cached.
    *
    * In test mode (`createCoreClient({ testMode: true })`), returns a stub for any id.
    */

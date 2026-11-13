@@ -211,7 +211,12 @@ describe("validateSet", () => {
         doc("a.json", {
           service: alpha({
             access: {
-              roles: ["file_user", "tenant_resolver", "audit_reader"],
+              roles: [
+                "file_user",
+                "tenant_resolver",
+                "group_resolver",
+                "audit_reader",
+              ],
               audiences: [],
             },
           }),
@@ -527,6 +532,20 @@ describe("validateSet", () => {
       "a.json: services[alpha-service]: webhooks[k]: alpha-service could not read auth.organization.created (needs organizations.read); add a role granting it to access.roles",
     ]);
     expect(withAccess(["tenant_resolver"])).toEqual([]);
+  });
+
+  it("reads group events through group_resolver", () => {
+    const withAccess = (roles: string[]) =>
+      validate(
+        doc("a.json", {
+          service: alpha({
+            access: { roles, audiences: [] },
+            webhooks: [{ key: "k", events: ["auth.group.created"] }],
+          }),
+        })
+      );
+    expect(withAccess(["user_resolver"])).toHaveLength(1);
+    expect(withAccess(["group_resolver"])).toEqual([]);
   });
 
   it("refuses a system role granting another service's permission", () => {

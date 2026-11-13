@@ -138,8 +138,7 @@ A service's account does not hold its own permissions. A webhook on the service'
 therefore needs a role in `access.roles` that grants the event's `readPermission`.
 
 Core's own roles are requestable by their bare name only; any other core role (`admin`,
-`platform_admin`, `*_admin`) or a `core/<name>` spelling is refused at load. `tenant_resolver` and
-`user_resolver` are requestable too.
+`platform_admin`, `*_admin`) or a `core/<name>` spelling is refused at load.
 
 | Role | Grants |
 |------|--------|
@@ -149,6 +148,9 @@ Core's own roles are requestable by their bare name only; any other core role (`
 | `audit_reader` | `audit-logs.read` — only the entries the service wrote ([audit.md](audit.md#organization-scope)) |
 | `notification_sender` | `notifications.send` |
 | `guest_inviter` | `users.guests.read`, `users.guests.write` — invite and manage guests |
+| `tenant_resolver` | `organizations.read` — read any organization |
+| `user_resolver` | `users.read` — read any user, and the groups a user belongs to |
+| `group_resolver` | `groups.read` — read any group, global or an organization's, with its members and roles; tells a missing group (`404`) from one that exists, which a service without it cannot (`403` for both) |
 
 Core's roles change only with core's code, so a granted core role gives whatever core's current
 version gives it.
