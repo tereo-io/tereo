@@ -44,6 +44,17 @@ none), `organizationId`, `organizationName`, and the deprecated `oauthClientId` 
 `client_id` again, or null. Core's own `AuthContext.oauthClientId` is something else (a
 service-account user's own client, not the token's), so read `clientId`.
 
+**`req.auth` beside the MCP SDK.** `@modelcontextprotocol/express` declares `req.auth` too, as its
+own `AuthInfo` (`token`, `clientId`, `scopes`, …), by augmenting `express-serve-static-core`'s
+`Request`; the SDK declares it on the global `Express.Request`. Only a project that imports
+`@modelcontextprotocol/express` itself loads that declaration; `@tereo-io/mcp` does not, and it
+exports its own `hostHeaderValidation` and `originValidation` for an app that mounts its
+`router()`. Where the import is there, TypeScript types `req.auth` as `AuthInfo`, so
+`req.auth.userId` does not compile, and with `skipLibCheck` off `@types/express-serve-static-core`
+reports TS2430. At run time the value is still what `requireAuth` set. Read it with
+`core.auth.validateUser(req)`, which is typed `AuthContext` whichever declaration wins, rather than
+casting `req.auth`.
+
 **Third-party tokens.** `permissions` are the user's live permissions, except for a token delegated
 to a third-party client by core API scopes (`core:*`), whose permissions core cuts down to those
 scopes' ceilings, as its own API does. A third-party token without core scopes carries the user's
@@ -65,6 +76,8 @@ scopes this service defines with `requireScope`.
 | `getUsers(userIds)` | `Map<userId, AuthServiceUser \| null>` — cache misses fetched together, one `GET /v1/admin/users?filter[id]=…&filter[id_op]=in` per 100 ids; a non-UUID id is null | as `getUser` |
 | `validateUserExists(userId)` | `boolean` | as `getUser` |
 | `getOrganization(id)` | `AuthServiceOrganization \| null` (null on 404) — `id` is the JWT `org_id` | 5 min; not-found 60 s |
+| `listUserGroups(userId, { includeArchived }?)` | `UserGroup[] \| null` — the user's groups, global and in any organization, each with its `organization` (null for a global group); archived groups only with `includeArchived`. Null on 404: no such user, or a core that predates groups. `GET /v1/admin/users/:id/groups`; needs `users.read` (`user_resolver`) | None |
+| `getGroup(id)` | `Group \| null` (null on 404), archived or not. `GET /v1/admin/groups/:id`; needs `groups.read` (`group_resolver`, which core 0.8.1 and later declares). Without it core answers 403 for every id, existing or not, so the call rejects | None |
 | `invalidateToken(token)` | Nothing. Drops the token's cached introspection, so its next use asks core | — |
 | `invalidateUser(...userIds)` | Nothing. Drops the cached lookup of each user, found or not | — |
 | `invalidateOrganization(...ids)` | Nothing. Drops the cached lookup of each organization, found or not | — |
@@ -73,16 +86,28 @@ scopes this service defines with `requireScope`.
 | `hasPermission(userPermissions, required)` | `boolean` — the hierarchical check `requirePermission` applies. Exported from the package, not a client method | — |
 
 Introspection uses `POST /oauth/introspect` over `CORE_PUBLIC_CLIENT` (the service's credentials as
-Basic auth); users and organizations use `/v1/admin/users/:id` and `/v1/admin/organizations/:id` over
-`CORE_CLIENT`, so the service needs access to read them. Core only reports a token active to this
-service when it was issued to this service's own client, or its audience includes this service's
-slug — an audience in the issuing service's provisioning document (`access.audiences`, see
+Basic auth); users, organizations and groups use `/v1/admin/users/:id`, `/v1/admin/organizations/:id`
+and `/v1/admin/groups/:id` over `CORE_CLIENT`, so the service needs access to read them: the
+requestable core roles `user_resolver` (users, and a user's groups), `tenant_resolver`
+(organizations) and `group_resolver` (groups) in its provisioning document's `access.roles`. Each
+reads across every organization, read-only: `group_resolver` reaches every group's members with
+their names and emails, not only the group `getGroup` asks for
+([registry](../../tereo/docs/registry.md#access)). A
+refusal, or any failure but the 404 that becomes `null`, rejects with a `RequestError` whose
+`httpStatus` is core's answer (undefined when core could not be reached). `getUser`,
+`getOrganization`, `listUserGroups` and `getGroup` send the id to core as given, so one that is not
+a UUID rejects with core's `400`; only `getUsers` answers `null` for it. One exception:
+`getOrganization("default")` reaches core's `GET /v1/admin/organizations/default` and returns the
+default organization, cached under `default`.
+
+Core only reports a token active to this service when it was issued to this service's own client,
+or its audience includes this service's slug — an audience in the issuing service's provisioning document (`access.audiences`, see
 [provisioning](provisioning.md)).
 
 The cache is the Redis passed to `createCoreClient`, under `@tereo-io/sdk:<clientId>:auth-sdk:v1:`,
 shared by the service's replicas and by no other service — another service's introspection says nothing
 about whether core would report the token active to this one.
-A Redis failure falls through to core.
+A Redis failure, or a command not answered within a second, falls through to core.
 
 ### How stale a cached answer can be
 
@@ -107,6 +132,8 @@ await core.auth.invalidateOrganization(orgId);
 ```
 
 Each removes the entry for every replica of the service, since they share the cache, and for no
-other service. The next call asks core. A Redis failure is logged and the entry left to expire.
+other service. The next call asks core. A Redis failure, or no answer within a second, is logged,
+and the entry may stay until it expires: a delete that timed out is still queued, and runs if Redis
+answers later.
 Invalidating needs the token itself: the cache is keyed by its hash, so tokens cannot be dropped
 by user. To bound every token's window, lower `introspectionCacheTtlSeconds`.

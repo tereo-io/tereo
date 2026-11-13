@@ -25,10 +25,39 @@ export const getCacheRedis = (): Redis => {
 export const buildCachePrefix = (sdk: string, version = 1): string =>
   `${sdk}:v${version}:`;
 
+/**
+ * How long a cache command may take before it counts as a failure. While
+ * ioredis reconnects it queues commands and, with `maxRetriesPerRequest:
+ * null`, waits on them until Redis is back, which would hold the request
+ * that made them for the whole outage.
+ */
+export const CACHE_COMMAND_TIMEOUT_MS = 1_000;
+
+class CacheTimeoutError extends Error {
+  constructor() {
+    super(`Redis did not answer within ${CACHE_COMMAND_TIMEOUT_MS} ms`);
+    this.name = "CacheTimeoutError";
+  }
+}
+
+// The command stays queued and may still run once Redis is back.
+const withinDeadline = <T>(command: Promise<T>): Promise<T> => {
+  // Settling after the deadline, it must not be an unhandled rejection.
+  command.catch(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new CacheTimeoutError()),
+      CACHE_COMMAND_TIMEOUT_MS
+    );
+  });
+  return Promise.race([command, timedOut]).finally(() => clearTimeout(timer));
+};
+
 // Caches are an optimisation: a Redis failure falls through to core.
 export const safeCacheGet = async <T>(key: string): Promise<T | undefined> => {
   try {
-    const raw = await getCacheRedis().get(scoped(key));
+    const raw = await withinDeadline(getCacheRedis().get(scoped(key)));
     return raw === null ? undefined : (JSON.parse(raw) as T);
   } catch (err) {
     logger.warn({ key, err }, "Cache read failed; falling through");
@@ -42,11 +71,8 @@ export const safeCacheSet = async (
   ttlSeconds: number
 ): Promise<void> => {
   try {
-    await getCacheRedis().set(
-      scoped(key),
-      JSON.stringify(value),
-      "EX",
-      ttlSeconds
+    await withinDeadline(
+      getCacheRedis().set(scoped(key), JSON.stringify(value), "EX", ttlSeconds)
     );
   } catch (err) {
     logger.warn({ key, err }, "Cache write failed; ignoring");
@@ -56,7 +82,7 @@ export const safeCacheSet = async (
 export const safeCacheDel = async (...keys: string[]): Promise<void> => {
   if (keys.length === 0) return;
   try {
-    await getCacheRedis().del(...keys.map(scoped));
+    await withinDeadline(getCacheRedis().del(...keys.map(scoped)));
   } catch (err) {
     logger.warn({ keys, err }, "Cache delete failed; ignoring");
   }

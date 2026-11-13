@@ -1,7 +1,7 @@
 import type { RoleDefinition } from "./types.js";
 
 // Core's system roles. `admin` holds the `admin` permission, which covers
-// everything. The roles after `file_user` are the ones app services request.
+// everything. App services may request the ones marked `requestable`.
 export const ROLES: RoleDefinition[] = [
   {
     name: "admin",
@@ -42,6 +42,14 @@ export const ROLES: RoleDefinition[] = [
     description:
       "Allows a backend service account to resolve user display details (name, email)",
     permissions: ["users.read"],
+  },
+  {
+    name: "group_resolver",
+    requestable: true,
+    displayName: "Group Resolver",
+    description:
+      "Read-only access to every group, global and in every organization: list and search them, read each one's roles, its members' names, emails and active flag, and its SCIM skipped members (names, emails), and receive auth.group.* webhook events",
+    permissions: ["groups.read"],
   },
   {
     name: "platform_admin",

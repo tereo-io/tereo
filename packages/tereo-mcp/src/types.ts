@@ -13,9 +13,10 @@ export interface ToolContext {
   requestId: string;
   logger: Logger;
   /**
-   * Aborts when the tool's timeout expires, when the client disconnects or
-   * cancels the call, and when a `listen` server begins closing. Pass it to
-   * database and HTTP calls: a timeout cannot stop a handler that ignores it.
+   * Aborts when the tool's timeout expires, when the client disconnects,
+   * when a 2026-era client cancels the call (a 2025-era cancel does not reach
+   * it), and when a `listen` server begins closing. Pass it to database and
+   * HTTP calls: a timeout cannot stop a handler that ignores it.
    */
   signal: AbortSignal;
 }
@@ -94,6 +95,7 @@ export interface TereoMcpOptions {
   maxResultBytes?: number;
   /** How long a tool call may run before it ends as a timeout. Default 60_000 ms. */
   toolTimeoutMs?: number;
+  /** For the metadata fetch at start. Default: `core.url`, else `CORE_URL`. */
   coreUrl?: string;
 }
 

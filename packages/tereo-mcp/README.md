@@ -79,7 +79,7 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | `allowedOrigins` | no | Browser origins allowed to call the endpoint, such as `https://app.example.com` (`listen` only). See [Serving](#serving) |
 | `scopes` | no | OAuth scopes advertised to clients, typically `["openid", "profile", "email"]`; advertised only, never required. See [Scopes](#scopes) |
 | `provisioning` | no | The service's provisioning document, for the start-time permission check |
-| `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default `CORE_URL`, as in the SDK |
+| `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default: the URL `core` was created with (`core.url`, which a client from an `@tereo-io/sdk` before 0.5.2 lacks), else `CORE_URL` |
 | `logger` | no | A Pino logger. Default a new one named `@tereo-io/mcp` |
 | `maxResultBytes` | no | Default 1 000 000; a positive integer. A larger result becomes a tool error instead of flooding the model |
 | `toolTimeoutMs` | no | Default 60 000; a positive integer. How long a tool call may run. See [Timeouts and cancellation](#timeouts-and-cancellation) |
@@ -142,10 +142,13 @@ with the tool in `tools/list` for clients to show people; the model still calls 
 - `await mcp.router()` returns an Express router with the protected-resource metadata routes and the
   MCP endpoint behind bearer auth. Mount it at the app root (`app.use(await mcp.router())`, not
   `app.use("/x", …)`): the `401` challenge and the `/.well-known` routes assume `publicUrl` maps to
-  `/`. The host app owns Host and Origin validation and body limits; use the MCP SDK's
-  `hostHeaderValidation` and `originValidation` from `@modelcontextprotocol/express`. It also owns
-  error handling: install a final JSON error handler, or Express answers a malformed body with its
-  HTML error page, which outside production carries the stack.
+  `/`. The host app owns Host and Origin validation and body limits; use this package's
+  `hostHeaderValidation` and `originValidation` (see [below](#host-and-origin-validation)). It
+  also owns error handling:
+  install a final JSON error handler, or Express answers a malformed body with its HTML error page,
+  which outside production carries the stack. Mount the router ahead of an app-wide
+  `core.auth.requireAuth`: its `/.well-known` routes take no token, and its endpoint checks the
+  token itself.
 - `await mcp.listen(port, host?, options?)` builds a standalone app, bound to `0.0.0.0` by default,
   that accepts the host of `publicUrl` (plus loopback names when `host` is loopback), and adds
   `GET /health`. It answers a request it rejects (a malformed JSON body, say) with JSON:
@@ -155,6 +158,57 @@ with the tool in `tools/list` for clients to show people; the model still calls 
   in-flight calls to finish, and closes the MCP handler. Calls still running after
   `shutdownTimeoutMs` have their connections dropped and `close()` resolves anyway. `close()` also
   removes the signal listeners that `listen` installed.
+
+### Host and Origin validation
+
+`hostHeaderValidation(allowedHostnames)` and `originValidation(allowedOrigins)` are Express
+middleware for an app that mounts `router()`, with the checks `listen` applies. Given the hostname
+of `publicUrl` and the `allowedOrigins` passed to `createTereoMcp`, they accept and refuse what
+`listen` does on a non-loopback bind:
+
+```ts
+import { createTereoMcp, hostHeaderValidation, originValidation } from "@tereo-io/mcp";
+
+const publicUrl = "https://mcp.example.com";
+const allowedOrigins = ["https://app.example.com"];
+const mcp = createTereoMcp({ publicUrl, allowedOrigins, /* … */ });
+
+app.use(hostHeaderValidation([new URL(publicUrl).hostname]));
+app.use(originValidation(allowedOrigins));
+app.use(express.json({ limit: "1mb" }));
+app.use(await mcp.router());
+```
+
+Without `allowedOrigins`, `listen` on a non-loopback bind checks no Origin; leave
+`originValidation` out to match.
+
+| Parameter | Each entry is | Compared with |
+|-----------|---------------|---------------|
+| `allowedHostnames` | A hostname as URL parsing writes it: lowercase, IPv6 in brackets (`mcp.example.com`, `127.0.0.1`, `[::1]`), with no scheme, port or path | The `Host` header's hostname; the port is not compared |
+| `allowedOrigins` | An http or https origin as `createTereoMcp` takes it (`https://app.example.com`), a hostname as above, or `<scheme>://*` for every origin of a non-web scheme (`moz-extension://*`) | The `Origin` header's hostname, or its scheme for a `<scheme>://*` entry; an origin entry's scheme and port are not compared |
+
+Any other entry (`https://mcp.example.com` as a hostname, a port, a path, `https://*`, an empty
+string) throws when the middleware is made, with a message naming it. `hostHeaderValidation`
+refuses a request whose `Host` is missing or not listed; `originValidation` lets a request without
+`Origin` through (only browsers send one) and refuses one that is not listed or cannot be parsed,
+such as `null`. Either answers `403` with a JSON-RPC error body. The lists are copied when the
+middleware is made.
+
+Unlike `listen`, they add nothing to the lists: to accept `localhost`, `127.0.0.1` and `[::1]` too,
+as `listen` does on a loopback bind, list them in both. Mount them ahead of the router, and ahead
+of anything else that should be protected the same way.
+
+### `req.auth` in the host app
+
+`@tereo-io/sdk` declares `req.auth` as its `AuthContext`, and importing `@tereo-io/mcp` leaves that
+alone. `@modelcontextprotocol/express`, the MCP SDK's Express package, declares `req.auth` as its
+own `AuthInfo`, so in a project that imports it directly (for its own middleware, say) that
+declaration wins: `req.auth.userId` does not compile on the app's own routes, and with
+`skipLibCheck` off `@types/express-serve-static-core` reports TS2430. The value there is still the
+`AuthContext` that `core.auth.requireAuth` set. Use this package's validation helpers rather than
+the MCP SDK's, or, where the import is needed, read the context with
+`core.auth.validateUser(req)`, which is typed `AuthContext`, rather than casting `req.auth`. On the
+MCP endpoint `req.auth` is the MCP SDK's; a tool gets the `AuthContext` as `ctx.auth`.
 
 ### Shutdown
 
@@ -246,8 +300,8 @@ metadata, so clients request them at sign-in. That is what makes `ctx.auth.name`
 - an `allowedOrigins` entry is not an http or https origin (scheme, host and optional port only);
 - a `scopes` entry is empty, contains whitespace, a quote or a backslash, is repeated, or is `offline_access`;
 - with `provisioning`, a tool needs a permission the document's service does not declare;
-- neither `coreUrl` nor `CORE_URL` is set, or Tereo's authorization-server metadata cannot be fetched
-  from `${coreUrl}/.well-known/oauth-authorization-server`;
+- none of `coreUrl`, `core.url` and `CORE_URL` is set, or Tereo's authorization-server metadata
+  cannot be fetched from `${coreUrl}/.well-known/oauth-authorization-server`;
 - the metadata's `issuer` is not https (plain http is allowed on `localhost` and `127.0.0.1`, as the
   MCP SDK requires) or has a query or fragment.
 
@@ -263,16 +317,20 @@ still counts toward the rate limit.
 `ctx.signal` aborts:
 
 - at the deadline, with a `TimeoutError` as its `reason`;
-- when the client disconnects or cancels the call (the MCP SDK's per-request signal, on both
-  protocol eras);
+- when the client disconnects, on both protocol eras (the MCP SDK's per-request signal);
+- when the client cancels the call, on the 2026 protocol era only. A 2026-era client cancels by
+  aborting the call's own HTTP stream, which reaches the call. A 2025-era (legacy) client cancels
+  by sending `notifications/cancelled` in a separate POST; since a server is built per request,
+  that notification reaches a fresh server with no such call and is dropped. The handler runs on
+  until it returns, throws or reaches its deadline, and is logged with that outcome;
 - when a `listen` server's `close()` begins, including the shutdown on a signal, with an
-  `AbortError`. `router()` has no `close()`, so there the signal aborts only at the deadline or
-  on a disconnect.
+  `AbortError`. `router()` has no `close()`, so there the signal aborts only at the deadline, on
+  a disconnect or on a 2026-era cancel.
 
-A handler that rejects with the abort, after a disconnect or `close()` (the signal's `reason`, or
-any `AbortError`, as `fetch` throws), ends as outcome `cancelled`, logged at info with no `err`;
-a client still connected gets the tool error `Tool call cancelled`. Any other error stays an
-internal error.
+A handler that rejects with the abort, after a disconnect, a cancel or `close()` (the signal's
+`reason`, or any `AbortError`, as `fetch` throws), ends as outcome `cancelled`, logged at info with
+no `err`; a client still connected gets the tool error `Tool call cancelled`. Any other error stays
+an internal error.
 
 A timeout answers the client; it cannot stop a handler that ignores `ctx.signal`, which runs on in
 the background, holding whatever connections and locks it has. Pass the signal to database and
@@ -325,8 +383,8 @@ synchronous and cheap: no async refinements, no lookups.
 | Anything else | `Internal error (request <id>)`, as a tool error | error, with `err`, outcome `internal_error` |
 
 A result over `maxResultBytes` is a tool error too (outcome `tool_error`), as is a call that runs
-past its timeout (outcome `timeout`, logged at warn) and one cancelled by a disconnect or
-`close()` (outcome `cancelled`, logged at info; see
+past its timeout (outcome `timeout`, logged at warn) and one cancelled by a disconnect, a
+2026-era cancel or `close()` (outcome `cancelled`, logged at info; see
 [Timeouts and cancellation](#timeouts-and-cancellation)). The wrapper exists so that a database
 error or a stack detail never reaches the model.
 

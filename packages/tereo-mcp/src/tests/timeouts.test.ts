@@ -216,4 +216,85 @@ describe("tool timeouts over the served endpoint", () => {
       expect(ctx.signal.aborted).toBe(true);
     }
   );
+
+  it("aborts the signal when the client cancels the call (modern era)", async () => {
+    let entered!: (ctx: ToolContext) => void;
+    const inHandler = new Promise<ToolContext>(
+      (resolve) => (entered = resolve)
+    );
+    const { server, lines } = await serve(
+      {},
+      tool(
+        "until_cancelled",
+        (_input, ctx) =>
+          new Promise((_resolve, reject) => {
+            entered(ctx);
+            ctx.signal.addEventListener("abort", () =>
+              reject(ctx.signal.reason)
+            );
+          })
+      )
+    );
+    const client = await connect(server.url, token, { era: "modern" });
+    const cancel = new AbortController();
+
+    const call = client
+      .callTool({ name: "until_cancelled" }, { signal: cancel.signal })
+      .catch(() => undefined);
+    const ctx = await inHandler;
+    cancel.abort();
+    await call;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(ctx.signal.aborted).toBe(true);
+    expect(lines.find((l) => l.msg === "MCP tool call")).toMatchObject({
+      outcome: "cancelled",
+    });
+    await client.close();
+  });
+
+  // A legacy client cancels with a separate notifications/cancelled POST,
+  // which reaches a fresh per-request server that has no such call.
+  it("does not abort the signal when the client cancels the call (legacy era)", async () => {
+    let entered!: (ctx: ToolContext) => void;
+    const inHandler = new Promise<ToolContext>(
+      (resolve) => (entered = resolve)
+    );
+    const { server, lines } = await serve(
+      // Well past the 200 ms the cancel gets below, so that on a slow runner
+      // the deadline cannot be what aborts the signal before it is checked.
+      { toolTimeoutMs: 1500 },
+      tool(
+        "until_cancelled",
+        (_input, ctx) =>
+          new Promise((_resolve, reject) => {
+            entered(ctx);
+            ctx.signal.addEventListener("abort", () =>
+              reject(ctx.signal.reason)
+            );
+          })
+      )
+    );
+    const client = await connect(server.url, token, { era: "legacy" });
+    const cancel = new AbortController();
+
+    const call = client
+      .callTool({ name: "until_cancelled" }, { signal: cancel.signal })
+      .catch(() => undefined);
+    const ctx = await inHandler;
+    const aborted = new Promise((resolve) =>
+      ctx.signal.addEventListener("abort", resolve, { once: true })
+    );
+    cancel.abort();
+    await call;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    expect(ctx.signal.aborted).toBe(false);
+    await aborted;
+    expect((ctx.signal.reason as Error).name).toBe("TimeoutError");
+    await expect
+      .poll(() => lines.find((l) => l.msg === "MCP tool call"))
+      .toMatchObject({ outcome: "timeout" });
+    await client.close();
+  });
 });

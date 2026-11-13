@@ -55,7 +55,7 @@ export const runTool = async (
     logger: Logger;
   },
   input: unknown,
-  // The MCP SDK's per-request signal: client cancellation or disconnect.
+  // The MCP SDK's per-request signal: a disconnect, or a 2026-era client's cancel.
   requestSignal?: AbortSignal
 ): Promise<ToolResult> => {
   const { tool, ctx, limiter, maxResultBytes, timeoutMs, logger } = deps;

@@ -1,4 +1,5 @@
 import type { OAuthMetadata } from "@modelcontextprotocol/server";
+import { parseOrigin } from "./validation.js";
 import type {
   ListenOptions,
   TereoMcpOptions,
@@ -88,21 +89,7 @@ export const checkListenOptions = (options: ListenOptions = {}): void => {
 
 const checkAllowedOrigins = (origins: readonly string[] | undefined) => {
   for (const origin of origins ?? []) {
-    let url: URL | undefined;
-    try {
-      url = new URL(origin);
-    } catch {
-      url = undefined;
-    }
-    if (
-      !url ||
-      (url.protocol !== "https:" && url.protocol !== "http:") ||
-      url.pathname !== "/" ||
-      url.search !== "" ||
-      url.hash !== "" ||
-      url.username !== "" ||
-      url.password !== ""
-    ) {
+    if (!parseOrigin(origin)) {
       fail(
         `allowedOrigins entry ${JSON.stringify(origin)} is not an origin such as "https://app.example.com"`
       );
@@ -237,8 +224,16 @@ export const runStartChecks = async (
   checkScopes(options.scopes);
   checkPermissions(options, tools);
 
-  const coreUrl = options.coreUrl ?? process.env.CORE_URL;
-  if (!coreUrl) fail("coreUrl is not set and neither is CORE_URL");
+  const coreUrl =
+    options.coreUrl ??
+    // Undefined on a CoreClient from an @tereo-io/sdk that predates `url`.
+    (options.core.url as string | undefined) ??
+    process.env.CORE_URL;
+  if (!coreUrl) {
+    fail(
+      "coreUrl is not set, the core client has no url, and CORE_URL is unset"
+    );
+  }
 
   const oauthMetadata = await fetchMetadata(coreUrl, fetchImpl);
   checkIssuer(oauthMetadata.issuer);

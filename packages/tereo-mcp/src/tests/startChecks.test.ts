@@ -1,6 +1,6 @@
+import type { CoreClient, ProvisioningDocument } from "@tereo-io/sdk";
 import type { TereoMcpOptions, ToolDefinition } from "../types.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ProvisioningDocument } from "@tereo-io/sdk";
 import { runStartChecks } from "../startChecks.js";
 import { fakeRedis } from "./support/fakeRedis.js";
 import { fakeCore } from "./support/fakeCore.js";
@@ -31,6 +31,9 @@ const options = (extra: Partial<TereoMcpOptions> = {}): TereoMcpOptions => ({
   coreUrl: "https://tereo.example.test",
   ...extra,
 });
+
+const withUrl = (url: string): CoreClient =>
+  ({ ...fakeCore(), url }) as CoreClient;
 
 const tool = (permission: string | null): ToolDefinition => ({
   name: `tool_${(permission ?? "open").replace(/\./g, "_")}`,
@@ -220,7 +223,36 @@ describe("runStartChecks", () => {
     );
   });
 
-  it("falls back to CORE_URL", async () => {
+  it("prefers coreUrl to the core client's url", async () => {
+    vi.stubEnv("CORE_URL", "http://env-core:4001");
+    const fetchImpl = answering(200, metadata);
+    await runStartChecks(
+      options({
+        core: withUrl("http://client-core:4001"),
+        coreUrl: "http://given-core:4001",
+      }),
+      [],
+      fetchImpl
+    );
+    expect(String(fetchImpl.mock.calls[0][0])).toBe(
+      "http://given-core:4001/.well-known/oauth-authorization-server"
+    );
+  });
+
+  it("falls back to the core client's url before CORE_URL", async () => {
+    vi.stubEnv("CORE_URL", "http://env-core:4001");
+    const fetchImpl = answering(200, metadata);
+    await runStartChecks(
+      options({ core: withUrl("http://client-core:4001"), coreUrl: undefined }),
+      [],
+      fetchImpl
+    );
+    expect(String(fetchImpl.mock.calls[0][0])).toBe(
+      "http://client-core:4001/.well-known/oauth-authorization-server"
+    );
+  });
+
+  it("falls back to CORE_URL when the core client has no url", async () => {
     vi.stubEnv("CORE_URL", "http://core:4001");
     const fetchImpl = answering(200, metadata);
     await runStartChecks(options({ coreUrl: undefined }), [], fetchImpl);
@@ -229,7 +261,7 @@ describe("runStartChecks", () => {
     );
   });
 
-  it("fails when neither coreUrl nor CORE_URL is set", async () => {
+  it("fails when neither coreUrl, the core client's url nor CORE_URL is set", async () => {
     vi.stubEnv("CORE_URL", undefined);
     const fetchImpl = answering(200, metadata);
     const message = await failure(

@@ -59,8 +59,9 @@ public (no secret), uses the authorization-code flow and names the service in `a
   from their own servers, so `localhost` and private networks do not work.
 - `publicUrl` is the MCP server's public origin, and the endpoint is `${publicUrl}${path}`.
 - Core's `ISSUER` equals the URL its discovery document is served from. The MCP server fetches
-  `${coreUrl}/.well-known/oauth-authorization-server` at start and tells clients to sign in at the
-  issuer it names, so a mismatch sends clients to the wrong place.
+  `${coreUrl}/.well-known/oauth-authorization-server` at start (`coreUrl`, else the URL the core
+  client was created with, else `CORE_URL`) and tells clients to sign in at the issuer it names, so
+  a mismatch sends clients to the wrong place.
 - The permissions the tools name exist in the service's provisioning document and are granted to
   users through roles. A user sees only the tools whose permission they hold.
 

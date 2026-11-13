@@ -131,6 +131,23 @@ describe("createCoreClient", () => {
     await core.stop();
   });
 
+  it("exposes the URL it reaches core at, without a trailing slash", async () => {
+    const core = createCoreClient(options);
+    expect(core.url).toBe("http://core:4001");
+    await core.stop();
+  });
+
+  it("exposes CORE_URL as its URL when given none", async () => {
+    vi.stubEnv("CORE_URL", "http://core-from-env:4001/");
+    try {
+      const core = createCoreClient({ ...options, url: undefined });
+      expect(core.url).toBe("http://core-from-env:4001");
+      await core.stop();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("reads missing options from env, and says which is missing", () => {
     expect(() =>
       createCoreClient({ service: "x", redis: {} as never })

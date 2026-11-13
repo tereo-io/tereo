@@ -1,9 +1,10 @@
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
 import { createServer, type Server as HttpServer } from "node:http";
+import type { AuthContext, CoreClient } from "@tereo-io/sdk";
 import { toNodeHandler } from "@modelcontextprotocol/node";
-import { afterEach, describe, expect, it } from "vitest";
+import type { Request, RequestHandler } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { connect } from "./support/connect.js";
-import type { RequestHandler } from "express";
 import type { AddressInfo } from "node:net";
 import { z } from "zod";
 import {
@@ -222,5 +223,15 @@ describe("MCP SDK contract", () => {
     expect(seen.length).toBeGreaterThan(0);
     expect(seen[seen.length - 1]).toEqual({ marker: "from-middleware" });
     await client.close();
+  });
+});
+
+// Checked by tsc (npm run check), not at run time.
+describe("req.auth with @modelcontextprotocol/express loaded", () => {
+  it("is typed as the MCP SDK's AuthInfo, while validateUser stays AuthContext", () => {
+    expectTypeOf<NonNullable<Request["auth"]>>().toEqualTypeOf<AuthInfo>();
+    expectTypeOf<
+      CoreClient["auth"]["validateUser"]
+    >().returns.toEqualTypeOf<AuthContext>();
   });
 });

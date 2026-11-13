@@ -7,6 +7,11 @@ import { hasPermission } from "../utils/permissions.js";
 import { logger } from "../utils/logger.js";
 import { UsersClient } from "./users.js";
 import crypto from "crypto";
+import type {
+  Group,
+  ListUserGroupsQuery,
+  UserGroup,
+} from "../requests/auth/groups/types.js";
 import {
   ForbiddenError,
   NotFoundError,
@@ -29,7 +34,8 @@ import type {
   AuthServiceUser,
 } from "../types/auth.js";
 
-// Extend Express Request type to include auth and organization context
+// @modelcontextprotocol/express declares `auth` too, as its AuthInfo, and in a
+// project that loads it that type wins; validateUser stays typed AuthContext.
 declare global {
   namespace Express {
     interface Request {
@@ -154,7 +160,8 @@ export class AuthServiceClient {
    * Drops the cached introspection of `token`, for every replica of this
    * service, so its next use asks core. For a service that learns a token
    * is revoked (a sign-out it handles, a webhook from core) and cannot wait
-   * out the cache. A Redis failure is logged and the entry left to expire.
+   * out the cache. A Redis failure, or no answer within a second, is logged,
+   * and the entry may stay until it expires.
    */
   async invalidateToken(token: string): Promise<void> {
     await safeCacheDel(tokenCacheKey(token));
@@ -354,6 +361,61 @@ export class AuthServiceClient {
   }
 
   /**
+   * The groups the user belongs to, global and in any organization. Null when
+   * core answers 404: no such user, or a core that predates groups. Needs
+   * `users.read` (the `user_resolver` role). Not cached.
+   *
+   * In test mode (`createCoreClient({ testMode: true })`), returns no groups.
+   */
+  async listUserGroups(
+    userId: string,
+    query: ListUserGroupsQuery = {}
+  ): Promise<UserGroup[] | null> {
+    if (this.testMode) return [];
+    try {
+      return (await requests.auth.listUserGroups(userId, query)).data;
+    } catch (error) {
+      if (getOriginalStatus(error) === 404) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * A group by id, archived or not. Null when core answers 404. Needs
+   * `groups.read` (the `group_resolver` role): without it core answers 403
+   * for every id, existing or not. Not cached.
+   *
+   * In test mode (`createCoreClient({ testMode: true })`), returns a stub for any id.
+   */
+  async getGroup(id: string): Promise<Group | null> {
+    if (this.testMode) {
+      const now = new Date().toISOString();
+      return {
+        id,
+        organizationId: null,
+        slug: `test-group-${id}`.toLowerCase().replace(/[^a-z0-9-]/g, "-"),
+        name: `Test Group ${id}`,
+        description: null,
+        definitionSource: "local",
+        membershipSource: "local",
+        unprovisionedAt: null,
+        archivedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        memberCount: 0,
+        managedBy: null,
+        skippedMemberCount: 0,
+      };
+    }
+    try {
+      return await requests.auth.getGroup(id);
+    } catch (error) {
+      if (getOriginalStatus(error) === 404) return null;
+      throw error;
+    }
+  }
+
+  /**
    * This service as core knows it: the provisioning document's version and
    * hash core last applied, when, and the service's access. Not cached — call
    * it at start to check the deploy's document has been applied.
@@ -391,7 +453,6 @@ export class AuthServiceClient {
     try {
       const authHeader = req.headers.authorization;
 
-      // Skip auth for public routes when no token is present
       if (this.publicRoutes.length > 0 && !authHeader) {
         const fullPath = req.originalUrl.split("?")[0];
         const isPublic = this.publicRoutes.some((route) => {
