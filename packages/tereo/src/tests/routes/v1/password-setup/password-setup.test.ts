@@ -8,6 +8,7 @@ import { createGuest, issue } from "../../../support/passwordSetup.js";
 import { getRedisClient, redisKey } from "../../../../utils/redis.js";
 import { createTestClient } from "../../../support/auth/clients.js";
 import { SYSTEM_USER_ID } from "../../../../definitions/index.js";
+import { emittedEvents } from "../../../support/outboxLog.js";
 import { hashKeyPart } from "../../../../utils/rateLimit.js";
 import { normalizeEmail } from "../../../../utils/email.js";
 import { describe, it, expect, beforeAll } from "vitest";
@@ -275,16 +276,9 @@ describe("password setup", () => {
         .filter((m) => m.action === "email_verified");
 
     const eventsOf = async (userId: string, eventType: string) =>
-      (await prisma.outbox.findMany({ where: { destination: "webhook" } }))
-        .map(
-          (r) =>
-            r.payload as {
-              eventType: string;
-              entityId: string;
-              data: { via: string };
-            }
-        )
-        .filter((p) => p.eventType === eventType && p.entityId === userId);
+      (await emittedEvents(userId, eventType)).map(
+        (event) => event as typeof event & { data: { via: string } }
+      );
 
     it("sets a regular user's password; a setup link still refuses one", async () => {
       const user = await createTestUser();
@@ -444,8 +438,8 @@ describe("password setup", () => {
       expect(audits).toHaveLength(1);
       expect(audits[0].via).toBe("password_link");
       const events = await eventsOf(user.id, "auth.user.email-verified");
-      expect(events.length).toBeLessThanOrEqual(1);
-      for (const e of events) expect(e.data.via).toBe("password_link");
+      expect(events).toHaveLength(1);
+      expect(events[0].data.via).toBe("password_link");
     });
 
     it("leaves an already verified email's timestamp alone", async () => {
@@ -478,9 +472,9 @@ describe("password setup", () => {
         [user.id, "reset"],
         [guest.id, "setup"],
       ] as const) {
-        for (const e of await eventsOf(id, "auth.user.password-set")) {
-          expect(e.data.via).toBe(via);
-        }
+        const events = await eventsOf(id, "auth.user.password-set");
+        expect(events).toHaveLength(1);
+        expect(events[0].data.via).toBe(via);
       }
     });
   });

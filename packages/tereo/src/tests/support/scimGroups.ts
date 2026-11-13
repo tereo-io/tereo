@@ -1,6 +1,7 @@
 import { SYSTEM_USER_ID } from "../../definitions/index.js";
 import { makeUser, manage, tag } from "./scimUsers.js";
 import { prisma } from "../../utils/db/prisma.js";
+import { emittedEvents } from "./outboxLog.js";
 import { joinOrg } from "./groups.js";
 import {
   createScimConnection,
@@ -129,10 +130,8 @@ export const groupAuditActions = async (groupId: string) =>
     detail: (e.metadata as { action?: string } | null)?.action,
   }));
 
-export const groupEventCount = (groupId: string) =>
-  prisma.outbox.count({
-    where: { payload: { path: ["entityId"], equals: groupId } },
-  });
+export const groupEventCount = async (groupId: string) =>
+  (await emittedEvents(groupId)).length;
 
 /** Inserts `count` plain users directly; returns their ids, ascending. */
 export const seedUsers = async (count: number): Promise<string[]> => {

@@ -45,8 +45,14 @@ test("a sign-in is audited with the client's address", async ({
   await elsewhere.context().close();
 
   await page.goto("/audit-log/entries");
-  await page.getByRole("textbox", { name: "IP Address" }).fill(ip);
+  const filter = page.getByRole("textbox", { name: "IP Address" });
   const login = entries(page).getByRole("row", { name: /LOGIN/ });
-  await expect(login).toHaveCount(1);
+  // The page rebuilds its filter menu when the filter options arrive, which
+  // drops a value typed just before: type it again until it holds.
+  await expect(async () => {
+    await filter.fill(ip);
+    await expect(filter).toHaveValue(ip);
+    await expect(login).toHaveCount(1, { timeout: 3_000 });
+  }).toPass({ timeout: 20_000 });
   await expect(login).toContainText("admin@e2e.test");
 });

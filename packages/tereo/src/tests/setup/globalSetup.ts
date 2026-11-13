@@ -32,6 +32,8 @@ export async function setup() {
   run(["tsx", "src/scripts/seed.ts"]);
 
   const { prisma } = await import("../../utils/db/prisma.js");
+  const { installOutboxLog } = await import("../support/outboxLog.js");
+  await installOutboxLog();
   const { hashPassword } = await import("../../utils/crypto.js");
 
   // Auth's admin-client tests register clients owned by this user. Created

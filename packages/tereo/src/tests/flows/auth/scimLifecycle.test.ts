@@ -4,6 +4,7 @@ import { createScimConnection, scimFetch } from "../../support/scim.js";
 import { DEFAULT_ORGANIZATION_ID } from "../../../definitions/index.js";
 import { getTestPrincipalToken } from "../../support/principals.js";
 import { oktaCreateUser } from "../../fixtures/scim/okta.js";
+import { emittedEvents } from "../../support/outboxLog.js";
 import { BASE_URL } from "../../support/auth/constants.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
@@ -192,8 +193,12 @@ describe("SCIM user lifecycle", () => {
       adminHold: false,
     });
 
-    // Deliveries fan out in emission order: once the lift's is in, every
-    // earlier step's is too. Only the IdP's deactivation and the lift emit.
+    // Only the IdP's deactivation and the lift emit.
+    expect(
+      (await emittedEvents(id, "auth.user.updated")).map(
+        (event) => (event.data as { isActive: boolean }).isActive
+      )
+    ).toEqual([false, true]);
     const deliveries = () =>
       prisma.webhookDelivery.findMany({
         where: {
@@ -204,10 +209,7 @@ describe("SCIM user lifecycle", () => {
       });
     const activeIn = (payload: unknown) =>
       (payload as { data: { isActive: boolean } }).data.isActive;
-    await waitFor(
-      async () => (await deliveries()).some((d) => activeIn(d.payload)),
-      10_000
-    );
+    await waitFor(async () => (await deliveries()).length >= 2, 10_000);
     expect((await deliveries()).map((d) => activeIn(d.payload)).sort()).toEqual(
       [false, true]
     );

@@ -7,6 +7,7 @@ import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createGuest, issue } from "../../../../../support/passwordSetup.js";
 import { issueVerifyLinkFor } from "../../../../../support/verifyLink.js";
 import { createScimConnection } from "../../../../../support/scim.js";
+import { emittedEvents } from "../../../../../support/outboxLog.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
@@ -439,10 +440,12 @@ describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
       metadata: null,
     });
 
-    // Deliveries fan out in emission order: once the rename's is in, the
-    // no-change request's is too.
-    const later = `Renamed ${user.id}`;
-    expect((await patch(user.id, writer, { name: later })).status).toBe(200);
+    const emitted = await emittedEvents(user.id, "auth.user.updated");
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0].data).toMatchObject({
+      isActive: false,
+      name: user.name,
+    });
     const deliveries = () =>
       prisma.webhookDelivery.findMany({
         where: {
@@ -451,25 +454,13 @@ describe("PATCH /v1/admin/users/:id on a SCIM-managed user", () => {
           payload: { path: ["entityId"], equals: user.id },
         },
       });
-    await waitFor(
-      async () =>
-        (await deliveries()).some((d) =>
-          JSON.stringify(d.payload).includes(later)
-        ),
-      10_000
-    );
+    await waitFor(async () => (await deliveries()).length >= 1, 10_000);
     const delivered = (await deliveries()).map((d) => d.payload);
-    expect(delivered).toHaveLength(2);
-    expect(delivered).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          data: expect.objectContaining({ isActive: false, name: user.name }),
-        }),
-        expect.objectContaining({
-          data: expect.objectContaining({ isActive: false, name: later }),
-        }),
-      ])
-    );
+    expect(delivered).toEqual([
+      expect.objectContaining({
+        data: expect.objectContaining({ isActive: false, name: user.name }),
+      }),
+    ]);
   });
 
   it("changes the rate limit and the password", async () => {

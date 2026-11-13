@@ -110,6 +110,9 @@ requires (`AREA_BY_PATH` in `tags.ts`, longest prefix wins). Detail tags are opt
   401 without a token and 403 with a token without permissions. Per-route files test only
   route-specific authorization (`.permissions`).
 - **Side effects**: one test per mutation for its audit entry, outbox event or delivery.
+  Read emitted events with `emittedEvents` (`support/outboxLog.ts`), never from `core.outbox`: the
+  server's reaper deletes a row once it has dispatched it. Deliveries land in no fixed order, so
+  wait for the number you expect, not for the last one.
 - **Business logic, database behaviour, races, sweeps, jobs**: `int`.
 - **Duplicates**: the more expensive tier's copy goes. List each removal in the commit message as
   `removed: <old file> > <test name> -> covered by <new file> > <test name>`.
