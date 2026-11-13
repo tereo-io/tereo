@@ -142,9 +142,9 @@ with the tool in `tools/list` for clients to show people; the model still calls 
 - `await mcp.router()` returns an Express router with the protected-resource metadata routes and the
   MCP endpoint behind bearer auth. Mount it at the app root (`app.use(await mcp.router())`, not
   `app.use("/x", …)`): the `401` challenge and the `/.well-known` routes assume `publicUrl` maps to
-  `/`. The host app owns Host and Origin validation and body limits; use the MCP SDK's
-  `hostHeaderValidation` and `originValidation` from `@modelcontextprotocol/express` (which changes
-  the type of `req.auth`; see [below](#reqauth-in-the-host-app)). It also owns error handling:
+  `/`. The host app owns Host and Origin validation and body limits; use this package's
+  `hostHeaderValidation` and `originValidation` (see [below](#host-and-origin-validation)). It
+  also owns error handling:
   install a final JSON error handler, or Express answers a malformed body with its HTML error page,
   which outside production carries the stack. Mount the router ahead of an app-wide
   `core.auth.requireAuth`: its `/.well-known` routes take no token, and its endpoint checks the
@@ -159,17 +159,43 @@ with the tool in `tools/list` for clients to show people; the model still calls 
   `shutdownTimeoutMs` have their connections dropped and `close()` resolves anyway. `close()` also
   removes the signal listeners that `listen` installed.
 
+### Host and Origin validation
+
+`hostHeaderValidation(allowedHosts)` and `originValidation(allowedOrigins)` are Express middleware
+for an app that mounts `router()`, with the checks `listen` applies:
+
+```ts
+import { createTereoMcp, hostHeaderValidation, originValidation } from "@tereo-io/mcp";
+
+app.use(hostHeaderValidation(["mcp.example.com"]));
+app.use(originValidation(["app.example.com"]));
+app.use(express.json({ limit: "1mb" }));
+app.use(await mcp.router());
+```
+
+Both take **hostnames**, not URLs: `mcp.example.com`, `127.0.0.1`, `[::1]` for IPv6. The port is
+not compared, nor is the Origin's scheme. `hostHeaderValidation` refuses a request whose `Host` is
+missing or not listed; `originValidation` lets a request without `Origin` through (only browsers
+send one) and refuses one that is not listed or cannot be parsed, such as `null`. Either answers
+`403` with a JSON-RPC error body. An `originValidation` entry of the form `<scheme>://*`, such as
+`moz-extension://*`, allows every origin of that non-web scheme. The lists are copied when the
+middleware is made.
+
+Unlike `listen`, they add nothing to the lists: to accept `localhost`, `127.0.0.1` and `[::1]` too,
+as `listen` does on a loopback bind, list them. Mount them ahead of the router, and ahead of
+anything else that should be protected the same way.
+
 ### `req.auth` in the host app
 
-`@modelcontextprotocol/express` and `@tereo-io/sdk` both declare `req.auth`: the MCP SDK as its
-`AuthInfo`, on `express-serve-static-core`'s `Request`, and Tereo's SDK as its `AuthContext`, on the
-global `Express.Request`. In a project that imports `@modelcontextprotocol/express` anywhere, the MCP
-SDK's declaration wins, so `req.auth.userId` does not compile on the app's own routes (and with
-`skipLibCheck` off, `@types/express-serve-static-core` reports TS2430). The value there is still the
-`AuthContext` that `core.auth.requireAuth` set: read it with `core.auth.validateUser(req)`, which is
-typed `AuthContext`, rather than casting `req.auth`. On the MCP endpoint `req.auth` is the MCP SDK's;
-a tool gets the `AuthContext` as `ctx.auth`. A project that imports only `@tereo-io/mcp` and
-`@tereo-io/sdk` is not affected.
+`@tereo-io/sdk` declares `req.auth` as its `AuthContext`, and importing `@tereo-io/mcp` leaves that
+alone. `@modelcontextprotocol/express`, the MCP SDK's Express package, declares `req.auth` as its
+own `AuthInfo`, so in a project that imports it directly (for its own middleware, say) that
+declaration wins: `req.auth.userId` does not compile on the app's own routes, and with
+`skipLibCheck` off `@types/express-serve-static-core` reports TS2430. The value there is still the
+`AuthContext` that `core.auth.requireAuth` set. Use this package's validation helpers rather than
+the MCP SDK's, or, where the import is needed, read the context with
+`core.auth.validateUser(req)`, which is typed `AuthContext`, rather than casting `req.auth`. On the
+MCP endpoint `req.auth` is the MCP SDK's; a tool gets the `AuthContext` as `ctx.auth`.
 
 ### Shutdown
 
