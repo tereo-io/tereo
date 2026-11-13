@@ -34,7 +34,8 @@ import type {
   AuthServiceUser,
 } from "../types/auth.js";
 
-// Extend Express Request type to include auth and organization context
+// @modelcontextprotocol/express declares `auth` too, as its AuthInfo, and in a
+// project that loads it that type wins; validateUser stays typed AuthContext.
 declare global {
   namespace Express {
     interface Request {
@@ -451,7 +452,6 @@ export class AuthServiceClient {
     try {
       const authHeader = req.headers.authorization;
 
-      // Skip auth for public routes when no token is present
       if (this.publicRoutes.length > 0 && !authHeader) {
         const fullPath = req.originalUrl.split("?")[0];
         const isPublic = this.publicRoutes.some((route) => {

@@ -143,9 +143,12 @@ with the tool in `tools/list` for clients to show people; the model still calls 
   MCP endpoint behind bearer auth. Mount it at the app root (`app.use(await mcp.router())`, not
   `app.use("/x", …)`): the `401` challenge and the `/.well-known` routes assume `publicUrl` maps to
   `/`. The host app owns Host and Origin validation and body limits; use the MCP SDK's
-  `hostHeaderValidation` and `originValidation` from `@modelcontextprotocol/express`. It also owns
-  error handling: install a final JSON error handler, or Express answers a malformed body with its
-  HTML error page, which outside production carries the stack.
+  `hostHeaderValidation` and `originValidation` from `@modelcontextprotocol/express` (which changes
+  the type of `req.auth`; see [below](#reqauth-in-the-host-app)). It also owns error handling:
+  install a final JSON error handler, or Express answers a malformed body with its HTML error page,
+  which outside production carries the stack. Mount the router ahead of an app-wide
+  `core.auth.requireAuth`: its `/.well-known` routes take no token, and its endpoint checks the
+  token itself.
 - `await mcp.listen(port, host?, options?)` builds a standalone app, bound to `0.0.0.0` by default,
   that accepts the host of `publicUrl` (plus loopback names when `host` is loopback), and adds
   `GET /health`. It answers a request it rejects (a malformed JSON body, say) with JSON:
@@ -155,6 +158,18 @@ with the tool in `tools/list` for clients to show people; the model still calls 
   in-flight calls to finish, and closes the MCP handler. Calls still running after
   `shutdownTimeoutMs` have their connections dropped and `close()` resolves anyway. `close()` also
   removes the signal listeners that `listen` installed.
+
+### `req.auth` in the host app
+
+`@modelcontextprotocol/express` and `@tereo-io/sdk` both declare `req.auth`: the MCP SDK as its
+`AuthInfo`, on `express-serve-static-core`'s `Request`, and Tereo's SDK as its `AuthContext`, on the
+global `Express.Request`. In a project that imports `@modelcontextprotocol/express` anywhere, the MCP
+SDK's declaration wins, so `req.auth.userId` does not compile on the app's own routes (and with
+`skipLibCheck` off, `@types/express-serve-static-core` reports TS2430). The value there is still the
+`AuthContext` that `core.auth.requireAuth` set: read it with `core.auth.validateUser(req)`, which is
+typed `AuthContext`, rather than casting `req.auth`. On the MCP endpoint `req.auth` is the MCP SDK's;
+a tool gets the `AuthContext` as `ctx.auth`. A project that imports only `@tereo-io/mcp` and
+`@tereo-io/sdk` is not affected.
 
 ### Shutdown
 

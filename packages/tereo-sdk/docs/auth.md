@@ -44,6 +44,16 @@ none), `organizationId`, `organizationName`, and the deprecated `oauthClientId` 
 `client_id` again, or null. Core's own `AuthContext.oauthClientId` is something else (a
 service-account user's own client, not the token's), so read `clientId`.
 
+**`req.auth` beside the MCP SDK.** `@modelcontextprotocol/express` declares `req.auth` too, as its
+own `AuthInfo` (`token`, `clientId`, `scopes`, …), by augmenting `express-serve-static-core`'s
+`Request`; the SDK declares it on the global `Express.Request`. In a project that loads both — it
+imports `@modelcontextprotocol/express`, for instance for `hostHeaderValidation` beside
+`@tereo-io/mcp`'s `router()` — TypeScript types `req.auth` as `AuthInfo`, so `req.auth.userId` does
+not compile, and with `skipLibCheck` off `@types/express-serve-static-core` reports TS2430. At run
+time the value is still what `requireAuth` set. Read it with `core.auth.validateUser(req)`, which is
+typed `AuthContext` whichever declaration wins, rather than casting `req.auth`. A project that
+imports only `@tereo-io/mcp` and the SDK is not affected.
+
 **Third-party tokens.** `permissions` are the user's live permissions, except for a token delegated
 to a third-party client by core API scopes (`core:*`), whose permissions core cuts down to those
 scopes' ceilings, as its own API does. A third-party token without core scopes carries the user's
