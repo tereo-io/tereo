@@ -77,7 +77,7 @@ scopes this service defines with `requireScope`.
 | `validateUserExists(userId)` | `boolean` | as `getUser` |
 | `getOrganization(id)` | `AuthServiceOrganization \| null` (null on 404) — `id` is the JWT `org_id` | 5 min; not-found 60 s |
 | `listUserGroups(userId, { includeArchived }?)` | `UserGroup[] \| null` — the user's groups, global and in any organization, each with its `organization` (null for a global group); archived groups only with `includeArchived`. Null on 404: no such user, or a core that predates groups. `GET /v1/admin/users/:id/groups`; needs `users.read` (`user_resolver`) | None |
-| `getGroup(id)` | `Group \| null` (null on 404), archived or not. `GET /v1/admin/groups/:id`; needs `groups.read` (`group_resolver`). Without it core answers 403 for every id, existing or not, so the call rejects | None |
+| `getGroup(id)` | `Group \| null` (null on 404), archived or not. `GET /v1/admin/groups/:id`; needs `groups.read` (`group_resolver`, which core 0.8.1 and later declares). Without it core answers 403 for every id, existing or not, so the call rejects | None |
 | `invalidateToken(token)` | Nothing. Drops the token's cached introspection, so its next use asks core | — |
 | `invalidateUser(...userIds)` | Nothing. Drops the cached lookup of each user, found or not | — |
 | `invalidateOrganization(...ids)` | Nothing. Drops the cached lookup of each organization, found or not | — |
@@ -94,7 +94,9 @@ reads across every organization, read-only: `group_resolver` reaches every group
 their names and emails, not only the group `getGroup` asks for
 ([registry](../../tereo/docs/registry.md#access)). A
 refusal, or any failure but the 404 that becomes `null`, rejects with a `RequestError` whose
-`httpStatus` is core's answer (undefined when core could not be reached).
+`httpStatus` is core's answer (undefined when core could not be reached). `getUser`,
+`getOrganization`, `listUserGroups` and `getGroup` send the id to core as given, so one that is not
+a UUID rejects with core's `400`; only `getUsers` answers `null` for it.
 
 Core only reports a token active to this service when it was issued to this service's own client,
 or its audience includes this service's slug — an audience in the issuing service's provisioning document (`access.audiences`, see
@@ -128,6 +130,8 @@ await core.auth.invalidateOrganization(orgId);
 ```
 
 Each removes the entry for every replica of the service, since they share the cache, and for no
-other service. The next call asks core. A Redis failure, or no answer within a second, is logged and the entry left to expire.
+other service. The next call asks core. A Redis failure, or no answer within a second, is logged,
+and the entry may stay until it expires: a delete that timed out is still queued, and runs if Redis
+answers later.
 Invalidating needs the token itself: the cache is keyed by its hash, so tokens cannot be dropped
 by user. To bound every token's window, lower `introspectionCacheTtlSeconds`.

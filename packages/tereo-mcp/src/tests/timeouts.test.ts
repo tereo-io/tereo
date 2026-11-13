@@ -261,7 +261,9 @@ describe("tool timeouts over the served endpoint", () => {
       (resolve) => (entered = resolve)
     );
     const { server, lines } = await serve(
-      { toolTimeoutMs: 400 },
+      // Well past the 200 ms the cancel gets below, so that on a slow runner
+      // the deadline cannot be what aborts the signal before it is checked.
+      { toolTimeoutMs: 1500 },
       tool(
         "until_cancelled",
         (_input, ctx) =>
@@ -280,16 +282,19 @@ describe("tool timeouts over the served endpoint", () => {
       .callTool({ name: "until_cancelled" }, { signal: cancel.signal })
       .catch(() => undefined);
     const ctx = await inHandler;
+    const aborted = new Promise((resolve) =>
+      ctx.signal.addEventListener("abort", resolve, { once: true })
+    );
     cancel.abort();
     await call;
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     expect(ctx.signal.aborted).toBe(false);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await aborted;
     expect((ctx.signal.reason as Error).name).toBe("TimeoutError");
-    expect(lines.find((l) => l.msg === "MCP tool call")).toMatchObject({
-      outcome: "timeout",
-    });
+    await expect
+      .poll(() => lines.find((l) => l.msg === "MCP tool call"))
+      .toMatchObject({ outcome: "timeout" });
     await client.close();
   });
 });

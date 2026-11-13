@@ -160,7 +160,8 @@ export class AuthServiceClient {
    * Drops the cached introspection of `token`, for every replica of this
    * service, so its next use asks core. For a service that learns a token
    * is revoked (a sign-out it handles, a webhook from core) and cannot wait
-   * out the cache. A Redis failure is logged and the entry left to expire.
+   * out the cache. A Redis failure, or no answer within a second, is logged,
+   * and the entry may stay until it expires.
    */
   async invalidateToken(token: string): Promise<void> {
     await safeCacheDel(tokenCacheKey(token));
