@@ -141,14 +141,21 @@ What a call may do is what the service's provisioning document grants — see
 [docs/provisioning.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/provisioning.md) and core's
 [provisioning](https://github.com/tereo-io/tereo/blob/master/packages/tereo/docs/provisioning.md) notes. The read caches (introspection, users,
 organizations, buckets, object metadata) live in the same Redis, under the same
-`@tereo-io/sdk:<clientId>` prefix, so no service reads another's; a Redis failure falls
-through to core. They are served until they expire: a revoked token stays accepted for up to
+`@tereo-io/sdk:<clientId>` prefix, so no service reads another's; a Redis failure, or a cache
+command Redis has not answered within a second, falls through to core. They are served until they expire: a revoked token stays accepted for up to
 `auth.introspectionCacheTtlSeconds` (60 s by default, 300 s at most, `0` to turn the cache off), a
 user's or organization's state lags core by up to 5 minutes, and bucket and object metadata, which
 core invalidates over Redis pub/sub, by up to 1 hour if a message is lost.
 `core.auth.invalidateToken(token)`, `invalidateUser(id)` and `invalidateOrganization(id)` drop an
 entry at once — see [docs/auth.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md#how-stale-a-cached-answer-can-be). Mount `requestIdMiddleware()` to give each
 request an `X-Request-ID` and forward it on the calls made to core while handling it.
+
+During a Redis outage ioredis queues commands while it reconnects, and with
+`maxRetriesPerRequest: null` never fails them, so the SDK bounds its own cache commands at one second
+and then asks core. A call to core still goes through the request handler, which keeps its queue and
+tokens in the same Redis: `@dianemo/core` gives up on admitting a call after its `cleanupTimeout`
+(60 seconds; the SDK does not change it) and the call rejects, so `requireAuth` answers 401 after
+up to a minute rather than at once. `start()` waits until Redis answers.
 
 Errors from core reach the caller as `RequestError`: `code` is the SDK's code for the call
 (`FS_0013`), `httpStatus` the status core answered with (undefined after a network failure) and

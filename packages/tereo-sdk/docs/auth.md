@@ -99,7 +99,7 @@ or its audience includes this service's slug — an audience in the issuing serv
 The cache is the Redis passed to `createCoreClient`, under `@tereo-io/sdk:<clientId>:auth-sdk:v1:`,
 shared by the service's replicas and by no other service — another service's introspection says nothing
 about whether core would report the token active to this one.
-A Redis failure falls through to core.
+A Redis failure, or a command not answered within a second, falls through to core.
 
 ### How stale a cached answer can be
 
@@ -124,6 +124,6 @@ await core.auth.invalidateOrganization(orgId);
 ```
 
 Each removes the entry for every replica of the service, since they share the cache, and for no
-other service. The next call asks core. A Redis failure is logged and the entry left to expire.
+other service. The next call asks core. A Redis failure, or no answer within a second, is logged and the entry left to expire.
 Invalidating needs the token itself: the cache is keyed by its hash, so tokens cannot be dropped
 by user. To bound every token's window, lower `introspectionCacheTtlSeconds`.

@@ -135,6 +135,6 @@ change made anywhere drops the entry — when that Redis is the one core publish
 `REDIS_KEY_PREFIX` set publishes them under that prefix; pass the same value as `channelPrefix` to
 `createCoreClient`. On a Redis of
 its own, a change made elsewhere shows after the TTL; `uploadObject` and `patchObject` also drop the entry for their resulting key at
-once. A Redis failure falls through to core.
+once. A Redis failure, or a command not answered within a second, falls through to core.
 
 With `createCoreClient({ testMode: true })` every method returns stubs — see [testing](testing.md).
