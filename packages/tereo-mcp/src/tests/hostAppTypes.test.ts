@@ -104,33 +104,44 @@ const errors = (program: ts.Program): string[] =>
 const loads = (program: ts.Program, name: string): boolean =>
   program.getSourceFiles().some((f) => f.fileName.includes(name));
 
+// Each case type-checks a whole program, which takes seconds on a slow runner.
+const COMPILE_TIMEOUT_MS = 60_000;
+
 describe("a host app importing @tereo-io/mcp's validation helpers", () => {
   let declarations: Map<string, string>;
 
   beforeAll(() => {
     declarations = emitDeclarations();
-  }, 60_000);
+  }, COMPILE_TIMEOUT_MS);
 
-  it("keeps req.auth as the SDK's AuthContext", () => {
-    const program = hostAppProgram(declarations, hostApp());
+  it(
+    "keeps req.auth as the SDK's AuthContext",
+    () => {
+      const program = hostAppProgram(declarations, hostApp());
 
-    expect(errors(program)).toEqual([]);
-    expect(loads(program, "__declarations__/validation.d.ts")).toBe(true);
-    expect(loads(program, "__declarations__/testing.d.ts")).toBe(true);
-    expect(loads(program, "@modelcontextprotocol/express")).toBe(false);
-  });
+      expect(errors(program)).toEqual([]);
+      expect(loads(program, "__declarations__/validation.d.ts")).toBe(true);
+      expect(loads(program, "__declarations__/testing.d.ts")).toBe(true);
+      expect(loads(program, "@modelcontextprotocol/express")).toBe(false);
+    },
+    COMPILE_TIMEOUT_MS
+  );
 
   // The check above can fail: with the MCP SDK's Express package loaded, its
   // AuthInfo becomes req.auth.
-  it("would not, if @modelcontextprotocol/express were loaded", () => {
-    const program = hostAppProgram(
-      declarations,
-      hostApp('import "@modelcontextprotocol/express";')
-    );
+  it(
+    "would not, if @modelcontextprotocol/express were loaded",
+    () => {
+      const program = hostAppProgram(
+        declarations,
+        hostApp('import "@modelcontextprotocol/express";')
+      );
 
-    expect(loads(program, "@modelcontextprotocol/express")).toBe(true);
-    expect(errors(program).join("\n")).toMatch(
-      /Property 'userId' does not exist on type 'AuthInfo'/
-    );
-  });
+      expect(loads(program, "@modelcontextprotocol/express")).toBe(true);
+      expect(errors(program).join("\n")).toMatch(
+        /Property 'userId' does not exist on type 'AuthInfo'/
+      );
+    },
+    COMPILE_TIMEOUT_MS
+  );
 });
