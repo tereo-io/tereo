@@ -47,8 +47,8 @@ test("a sign-in is audited with the client's address", async ({
   await page.goto("/audit-log/entries");
   const filter = page.getByRole("textbox", { name: "IP Address" });
   const login = entries(page).getByRole("row", { name: /LOGIN/ });
-  // A value typed while the page is still loading can be dropped, leaving the
-  // list unfiltered: type it again until it holds.
+  // The page rebuilds its filter menu when the filter options arrive, which
+  // drops a value typed just before: type it again until it holds.
   await expect(async () => {
     await filter.fill(ip);
     await expect(filter).toHaveValue(ip);
