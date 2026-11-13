@@ -101,6 +101,7 @@ The returned `CoreClient`:
 
 | Member | |
 |--------|---|
+| `url` | Core's base URL as the client reaches it (`url`, else `CORE_URL`), without a trailing slash |
 | `auth` | `AuthServiceClient` — token introspection, `requireAuth`/`requirePermission`/`requireScope`, user, organization and group lookups. [docs/auth.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/auth.md) |
 | `files` | `FileServiceClient` — objects, buckets, permissions, versions, presigned URLs, archives, shares, lifecycle, multipart. [docs/files.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/files.md) |
 | `webhooks` | `WebhookServiceClient` — best-effort event emission; `createWebhookVerifier` for receivers. [docs/webhooks.md](https://github.com/tereo-io/tereo/blob/master/packages/tereo-sdk/docs/webhooks.md) |

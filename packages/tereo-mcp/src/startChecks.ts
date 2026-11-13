@@ -237,8 +237,16 @@ export const runStartChecks = async (
   checkScopes(options.scopes);
   checkPermissions(options, tools);
 
-  const coreUrl = options.coreUrl ?? process.env.CORE_URL;
-  if (!coreUrl) fail("coreUrl is not set and neither is CORE_URL");
+  const coreUrl =
+    options.coreUrl ??
+    // Undefined on a CoreClient from an @tereo-io/sdk that predates `url`.
+    (options.core.url as string | undefined) ??
+    process.env.CORE_URL;
+  if (!coreUrl) {
+    fail(
+      "coreUrl is not set, the core client has no url, and CORE_URL is unset"
+    );
+  }
 
   const oauthMetadata = await fetchMetadata(coreUrl, fetchImpl);
   checkIssuer(oauthMetadata.issuer);

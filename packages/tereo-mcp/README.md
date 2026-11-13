@@ -79,7 +79,7 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | `allowedOrigins` | no | Browser origins allowed to call the endpoint, such as `https://app.example.com` (`listen` only). See [Serving](#serving) |
 | `scopes` | no | OAuth scopes advertised to clients, typically `["openid", "profile", "email"]`; advertised only, never required. See [Scopes](#scopes) |
 | `provisioning` | no | The service's provisioning document, for the start-time permission check |
-| `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default `CORE_URL`, as in the SDK |
+| `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default: the URL `core` was created with (`core.url`, which a client from an `@tereo-io/sdk` before 0.5.2 lacks), else `CORE_URL` |
 | `logger` | no | A Pino logger. Default a new one named `@tereo-io/mcp` |
 | `maxResultBytes` | no | Default 1 000 000; a positive integer. A larger result becomes a tool error instead of flooding the model |
 | `toolTimeoutMs` | no | Default 60 000; a positive integer. How long a tool call may run. See [Timeouts and cancellation](#timeouts-and-cancellation) |
@@ -246,8 +246,8 @@ metadata, so clients request them at sign-in. That is what makes `ctx.auth.name`
 - an `allowedOrigins` entry is not an http or https origin (scheme, host and optional port only);
 - a `scopes` entry is empty, contains whitespace, a quote or a backslash, is repeated, or is `offline_access`;
 - with `provisioning`, a tool needs a permission the document's service does not declare;
-- neither `coreUrl` nor `CORE_URL` is set, or Tereo's authorization-server metadata cannot be fetched
-  from `${coreUrl}/.well-known/oauth-authorization-server`;
+- none of `coreUrl`, `core.url` and `CORE_URL` is set, or Tereo's authorization-server metadata
+  cannot be fetched from `${coreUrl}/.well-known/oauth-authorization-server`;
 - the metadata's `issuer` is not https (plain http is allowed on `localhost` and `127.0.0.1`, as the
   MCP SDK requires) or has a query or fragment.
 

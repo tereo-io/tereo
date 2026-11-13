@@ -73,6 +73,8 @@ export interface CoreClientOptions {
 }
 
 export interface CoreClient {
+  /** Core's base URL as this client reaches it (`url`, else `CORE_URL`), without a trailing slash. */
+  readonly url: string;
   auth: AuthServiceClient;
   files: FileServiceClient;
   webhooks: WebhookServiceClient;
@@ -127,7 +129,7 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
   }
   // Before createHandler, which claims the one-client-per-process slot.
   resolveUploadOptions(options.files);
-  const url = option(options.url, "CORE_URL", "url");
+  const url = option(options.url, "CORE_URL", "url").replace(/\/+$/, "");
   const clientId = option(options.clientId, "CORE_CLIENT_ID", "clientId");
   const handler = createHandler({
     url,
@@ -160,6 +162,7 @@ export const createCoreClient = (options: CoreClientOptions): CoreClient => {
     : null;
 
   return {
+    url,
     auth: new AuthServiceClient(
       options.auth,
       testMode,

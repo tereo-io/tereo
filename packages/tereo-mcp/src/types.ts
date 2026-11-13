@@ -94,6 +94,7 @@ export interface TereoMcpOptions {
   maxResultBytes?: number;
   /** How long a tool call may run before it ends as a timeout. Default 60_000 ms. */
   toolTimeoutMs?: number;
+  /** For the metadata fetch at start. Default: `core.url`, else `CORE_URL`. */
   coreUrl?: string;
 }
 
