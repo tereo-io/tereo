@@ -1,6 +1,6 @@
 {
   "name": "@tereo-io/mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Expose a Tereo app service's tools over the Model Context Protocol, authenticated by Tereo",
   "keywords": [
@@ -58,7 +58,7 @@
   },
   "peerDependencies": {
     "@modelcontextprotocol/client": "^2.4.0",
-    "@tereo-io/sdk": "^0.5.1",
+    "@tereo-io/sdk": "^0.5.2",
     "express": "^5",
     "ioredis": "^6",
     "zod": "^4.2.0"
