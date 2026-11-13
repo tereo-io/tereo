@@ -93,8 +93,9 @@ global roles only). A caller needs:
 An app service reads groups by requesting the core role `group_resolver` (`groups.read`) in its
 provisioning document's `access.roles` ([registry](registry.md#access)). Like any holder of
 `groups.read` it then reads every group, global and in every organization: the list and search,
-each group's roles, its members with their names, emails and active flag, its SCIM skipped
-members, and, through its provisioned webhooks, `auth.group.*` events. It changes nothing.
+each group's fields, including which identity provider manages it (`managedBy`), its roles, its
+members with their names, emails and active flag, its SCIM skipped members, and, through its
+provisioned webhooks, `auth.group.*` events. It changes nothing.
 `user_resolver` (`users.read`) lists a user's groups (`GET /v1/admin/users/:id/groups`) but not a
 group by id.
 

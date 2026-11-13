@@ -4,6 +4,7 @@ import { toNodeHandler } from "@modelcontextprotocol/node";
 import type { AddressInfo, Socket } from "node:net";
 import type { StartState } from "./startChecks.js";
 import { requestScope } from "./requestScope.js";
+import { originHostname } from "./validation.js";
 import type { ListenOptions } from "./types.js";
 import { createVerifier } from "./verifier.js";
 import type { ServerDeps } from "./server.js";
@@ -99,7 +100,7 @@ export const listenOn = async (
   // The SDK compares the Origin's hostname, and a list given here replaces
   // its loopback default rather than adding to it.
   const allowedOrigins = options.allowedOrigins && [
-    ...options.allowedOrigins.map((origin) => new URL(origin).hostname),
+    ...options.allowedOrigins.map(originHostname),
     ...loopbackNames,
   ];
   const app = createMcpExpressApp({ host, allowedHosts, allowedOrigins });

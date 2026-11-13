@@ -17,6 +17,7 @@ const hostApp = (...extraImports: string[]): string =>
     'import express from "express";',
     'import type { AuthContext } from "@tereo-io/sdk";',
     'import { hostHeaderValidation, originValidation } from "@tereo-io/mcp";',
+    'import { createTestClient } from "@tereo-io/mcp/testing";',
     "type Equal<A, B> =",
     "  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;",
     'const authIsTereos: Equal<NonNullable<express.Request["auth"]>, AuthContext> = true;',
@@ -27,6 +28,7 @@ const hostApp = (...extraImports: string[]): string =>
     'app.get("/me", (req, res) => {',
     "  res.json({ userId: req.auth?.userId, authIsTereos, helperIsTyped });",
     "});",
+    "export type TestClient = typeof createTestClient;",
   ].join("\n");
 
 const config = ts.parseJsonConfigFileContent(
@@ -69,7 +71,10 @@ const hostAppProgram = (
     incremental: false,
     noEmit: true,
     rootDir: undefined,
-    paths: { "@tereo-io/mcp": [join(declarationsDir, "index.d.ts")] },
+    paths: {
+      "@tereo-io/mcp": [join(declarationsDir, "index.d.ts")],
+      "@tereo-io/mcp/testing": [join(declarationsDir, "testing.d.ts")],
+    },
   };
   const virtual = new Map(declarations);
   virtual.set(hostAppFile, source);
@@ -111,6 +116,7 @@ describe("a host app importing @tereo-io/mcp's validation helpers", () => {
 
     expect(errors(program)).toEqual([]);
     expect(loads(program, "__declarations__/validation.d.ts")).toBe(true);
+    expect(loads(program, "__declarations__/testing.d.ts")).toBe(true);
     expect(loads(program, "@modelcontextprotocol/express")).toBe(false);
   });
 

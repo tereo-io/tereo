@@ -96,7 +96,9 @@ their names and emails, not only the group `getGroup` asks for
 refusal, or any failure but the 404 that becomes `null`, rejects with a `RequestError` whose
 `httpStatus` is core's answer (undefined when core could not be reached). `getUser`,
 `getOrganization`, `listUserGroups` and `getGroup` send the id to core as given, so one that is not
-a UUID rejects with core's `400`; only `getUsers` answers `null` for it.
+a UUID rejects with core's `400`; only `getUsers` answers `null` for it. One exception:
+`getOrganization("default")` reaches core's `GET /v1/admin/organizations/default` and returns the
+default organization, cached under `default`.
 
 Core only reports a token active to this service when it was issued to this service's own client,
 or its audience includes this service's slug — an audience in the issuing service's provisioning document (`access.audiences`, see

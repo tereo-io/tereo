@@ -42,12 +42,20 @@ const listenPort = async (): Promise<number> => {
 };
 
 // The host app a router() user writes, allowing what listen() allows on a
-// loopback bind for the same publicUrl and allowedOrigins.
-const hostAppPort = async (): Promise<number> => {
+// loopback bind for the same publicUrl and allowedOrigins: the origins as
+// hostnames, or as the URLs given to createTereoMcp.
+const hostAppPort = async (
+  form: "hostnames" | "origin URLs" = "hostnames"
+): Promise<number> => {
+  const opts = await options();
+  const origins =
+    form === "hostnames" ? ["app.example.com"] : (opts.allowedOrigins ?? []);
   const app = express();
-  app.use(hostHeaderValidation(["mcp.example.test", ...LOOPBACK]));
-  app.use(originValidation(["app.example.com", ...LOOPBACK]));
-  app.use(await createTereoMcp(await options()).router());
+  app.use(
+    hostHeaderValidation([new URL(opts.publicUrl).hostname, ...LOOPBACK])
+  );
+  app.use(originValidation([...origins, ...LOOPBACK]));
+  app.use(await createTereoMcp(opts).router());
   const server: HttpServer = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanups.push(
@@ -106,14 +114,69 @@ const cases: [string, Record<string, string>, number][] = [
 ];
 
 describe("hostHeaderValidation and originValidation", () => {
-  it.each(cases)("answer %s as listen() does", async (_, headers, status) => {
-    const [own, listened] = await Promise.all([
-      post(await hostAppPort(), headers),
-      post(await listenPort(), headers),
-    ]);
+  describe.each(["hostnames", "origin URLs"] as const)(
+    "with the allowed origins as %s",
+    (form) => {
+      it.each(cases)(
+        "answer %s as listen() does",
+        async (_, headers, status) => {
+          const [own, listened] = await Promise.all([
+            post(await hostAppPort(form), headers),
+            post(await listenPort(), headers),
+          ]);
 
-    expect(own.status).toBe(status);
-    expect(own).toEqual(listened);
+          expect(own.status).toBe(status);
+          expect(own).toEqual(listened);
+        }
+      );
+    }
+  );
+
+  it.each([
+    "https://mcp.example.com",
+    "mcp.example.com:443",
+    "mcp.example.com/mcp",
+    "MCP.example.com",
+    "",
+  ])("refuse to make host validation for %j", (entry) => {
+    expect(() => hostHeaderValidation(["mcp.example.com", entry])).toThrow(
+      `hostHeaderValidation: ${JSON.stringify(entry)} is not a hostname`
+    );
+  });
+
+  it.each([
+    "https://app.example.com/path",
+    "https://app.example.com/?q=1",
+    "ftp://app.example.com",
+    "app.example.com:3000",
+    "app.example.com/",
+    "https://",
+    "https://*",
+    "",
+  ])("refuse to make origin validation for %j", (entry) => {
+    expect(() => originValidation(["app.example.com", entry])).toThrow(
+      `originValidation: ${JSON.stringify(entry)} is not an origin`
+    );
+  });
+
+  it("keep a <scheme>://* entry for a browser extension's origins", async () => {
+    const app = express();
+    app.use(originValidation(["moz-extension://*"]));
+    app.post("/mcp", (_req, res) => {
+      res.sendStatus(204);
+    });
+    const server = createServer(app);
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve)
+    );
+    cleanups.push(
+      () => new Promise<void>((resolve) => server.close(() => resolve()))
+    );
+    const port = (server.address() as AddressInfo).port;
+
+    const from = (origin: string) => post(port, { origin });
+    expect((await from("moz-extension://4f1b2c")).status).toBe(204);
+    expect((await from("https://evil.example.com")).status).toBe(403);
   });
 
   it("refuse a Host that is not allowed with a JSON-RPC error", async () => {

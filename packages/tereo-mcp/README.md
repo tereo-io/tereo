@@ -161,29 +161,42 @@ with the tool in `tools/list` for clients to show people; the model still calls 
 
 ### Host and Origin validation
 
-`hostHeaderValidation(allowedHosts)` and `originValidation(allowedOrigins)` are Express middleware
-for an app that mounts `router()`, with the checks `listen` applies:
+`hostHeaderValidation(allowedHostnames)` and `originValidation(allowedOrigins)` are Express
+middleware for an app that mounts `router()`, with the checks `listen` applies. Given the hostname
+of `publicUrl` and the `allowedOrigins` passed to `createTereoMcp`, they accept and refuse what
+`listen` does on a non-loopback bind:
 
 ```ts
 import { createTereoMcp, hostHeaderValidation, originValidation } from "@tereo-io/mcp";
 
-app.use(hostHeaderValidation(["mcp.example.com"]));
-app.use(originValidation(["app.example.com"]));
+const publicUrl = "https://mcp.example.com";
+const allowedOrigins = ["https://app.example.com"];
+const mcp = createTereoMcp({ publicUrl, allowedOrigins, /* … */ });
+
+app.use(hostHeaderValidation([new URL(publicUrl).hostname]));
+app.use(originValidation(allowedOrigins));
 app.use(express.json({ limit: "1mb" }));
 app.use(await mcp.router());
 ```
 
-Both take **hostnames**, not URLs: `mcp.example.com`, `127.0.0.1`, `[::1]` for IPv6. The port is
-not compared, nor is the Origin's scheme. `hostHeaderValidation` refuses a request whose `Host` is
-missing or not listed; `originValidation` lets a request without `Origin` through (only browsers
-send one) and refuses one that is not listed or cannot be parsed, such as `null`. Either answers
-`403` with a JSON-RPC error body. An `originValidation` entry of the form `<scheme>://*`, such as
-`moz-extension://*`, allows every origin of that non-web scheme. The lists are copied when the
+Without `allowedOrigins`, `listen` on a non-loopback bind checks no Origin; leave
+`originValidation` out to match.
+
+| Parameter | Each entry is | Compared with |
+|-----------|---------------|---------------|
+| `allowedHostnames` | A hostname as URL parsing writes it: lowercase, IPv6 in brackets (`mcp.example.com`, `127.0.0.1`, `[::1]`), with no scheme, port or path | The `Host` header's hostname; the port is not compared |
+| `allowedOrigins` | An http or https origin as `createTereoMcp` takes it (`https://app.example.com`), a hostname as above, or `<scheme>://*` for every origin of a non-web scheme (`moz-extension://*`) | The `Origin` header's hostname, or its scheme for a `<scheme>://*` entry; an origin entry's scheme and port are not compared |
+
+Any other entry (`https://mcp.example.com` as a hostname, a port, a path, `https://*`, an empty
+string) throws when the middleware is made, with a message naming it. `hostHeaderValidation`
+refuses a request whose `Host` is missing or not listed; `originValidation` lets a request without
+`Origin` through (only browsers send one) and refuses one that is not listed or cannot be parsed,
+such as `null`. Either answers `403` with a JSON-RPC error body. The lists are copied when the
 middleware is made.
 
 Unlike `listen`, they add nothing to the lists: to accept `localhost`, `127.0.0.1` and `[::1]` too,
-as `listen` does on a loopback bind, list them. Mount them ahead of the router, and ahead of
-anything else that should be protected the same way.
+as `listen` does on a loopback bind, list them in both. Mount them ahead of the router, and ahead
+of anything else that should be protected the same way.
 
 ### `req.auth` in the host app
 
