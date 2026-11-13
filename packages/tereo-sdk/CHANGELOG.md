@@ -1,3 +1,24 @@
+## 0.5.1 (2026-11-13)
+
+### 🚀 Features
+
+- The SDK exports `authContextFromIntrospection`, which builds the `AuthContext` that `requireAuth` sets from an active introspection response, and `hasPermission`, the hierarchical permission check. ([#55](https://github.com/tereo-io/tereo/pull/55))
+- `core.files.uploadObject` now takes a `Buffer` or a `Readable`, and switches to a multipart upload on its own above `multipartThresholdBytes` (64 MiB by default), sending parts concurrently and aborting the upload if anything fails. Tune it with `createCoreClient({ files: { multipartThresholdBytes, partSizeBytes, partConcurrency } })`. `initiateMultipart` and `completeMultipart` accept `ifMatch` and `ifNoneMatch`. `UploadObjectInput.file` is now `Buffer | Readable`, so code that reads `input.file` as a Buffer needs a type narrowing. ([#46](https://github.com/tereo-io/tereo/pull/46))
+- `AuthServiceClient` gains `invalidateToken(token)`, `invalidateUser(...userIds)` and `invalidateOrganization(...ids)`, which drop the cached introspection result, user or organization for every replica of the service, so an app that learns of a revocation need not wait out the cache TTL. Defaults are unchanged; the README and `docs/auth.md` now state how stale each cache can be. ([#52](https://github.com/tereo-io/tereo/pull/52))
+
+  `uploadObject` takes an optional `expectedSize` for a stream body, sent when the multipart upload is initiated; core now requires it in a bucket with a quota. The notification send types gain `sensitive`.
+
+- The provisioning document types gain the `branding` block: `BrandingProvisioning` (`default` and per-client `clients`, keyed by `clientId`), `BrandingProfileProvisioning` (the text, `layout`, `footerLinks`, `applyToConsole` and image path slots, every one optional) and `BrandingColorVariable`, the list of colour variables a profile may set. `provisioning.schema.json` carries the block, limiting colour keys to those variables and footer link URLs to ones starting `https://` with no space or control character. The files types gain the bucket fields core now returns: `Bucket.coreManaged`, and `MyBucketPermissions.canRevokeShares`, `canPurgeVersions` and `coreManaged` (a core bucket is read-only through the files API, but for revoking and an admin's old-version purge); the test-mode mocks set them. ([#49](https://github.com/tereo-io/tereo/pull/49))
+- Email verification in the SDK: users carry `emailVerified` and `emailVerifiedAt`, and `core.auth.users.sendVerificationEmail(id)` asks core to email a user a verification link (`409 already_verified`, `user_not_verifiable`, `email_not_configured`); `UsersClient` is exported from the package root. In `testMode`, `getUser` returns a verified user and `users.sendVerificationEmail` resolves without calling core. ([#51](https://github.com/tereo-io/tereo/pull/51))
+- Group requests (`listGroups`, `getGroup`, `createGroup`, `updateGroup`, `archiveGroup`, `restoreGroup`, `listGroupMembers`, `addGroupMembers`, `removeGroupMember`, `setGroupRoles`, `listGroupRoles`, `listUserGroups`; lists take `includeArchived`) and their types, and `groups` in the provisioning document types. `AuthServiceUserRole` now carries `via`, and the user-roles response type `AuthServiceUserRolesResponse` has `groupRoles` (`AuthServiceUserGroupRole`) and `orgGroupRoles` (`AuthServiceUserOrgGroupRole`, with `organization`) beside `roles`. `listUserGroups` returns `UserGroup`s, each with its `organization` (null for a global group). ([#50](https://github.com/tereo-io/tereo/pull/50))
+- `core.guests` invites a guest user (`invite`), extends one or renames it (`extend`), issues a password-setup link (`issuePasswordSetupLink`), reads one (`get`), lists them (`list`) and reads what an invitation may use (`options`: the guest-assignable roles, the defaults and the longest expiry). The provisioning document types gain `guestAssignable` on custom roles and the top-level `guests` section. `AuthServiceUser` now always carries `expiresAt` (`string | null`) and `status`, as core returns them for every user. ([#48](https://github.com/tereo-io/tereo/pull/48))
+- Provisioning documents accept `rateLimitPerSecond` on `service` and on each of `integrations`, an integer from 1 to 100000 that replaces the account's default request limit; omitting it clears the value. The types and `provisioning.schema.json` carry it. ([#45](https://github.com/tereo-io/tereo/pull/45))
+- `Group.definitionSource` and `membershipSource` (and the `definitionSource` filter of `ListGroupsQuery`) can be `"scim"`; `Group` gains `managedBy` and `skippedMemberCount` ([#57](https://github.com/tereo-io/tereo/pull/57))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.5.0 (2026-11-02)
 
 ### 🩹 Fixes
