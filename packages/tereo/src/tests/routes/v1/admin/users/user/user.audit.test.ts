@@ -6,6 +6,7 @@ import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrgani
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
 import { createTestUser } from "../../../../../support/auth/users.js";
+import { emittedEvents } from "../../../../../support/outboxLog.js";
 import { BASE_URL } from "../../../../../support/auth/constants.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { fetchJson } from "../../../../../support/http.js";
@@ -64,18 +65,12 @@ describe("PATCH /v1/admin/users/:id", () => {
         name: { old: user.name, new: name },
       });
 
-      // Deliveries fan out in emission order: once a later change's is in,
-      // the combined change's are too.
-      const later = `${name} again`;
-      await patch(user.id, { name: later });
+      expect(await emittedEvents(user.id, "auth.user.updated")).toHaveLength(1);
       await waitFor(
-        async () =>
-          (await deliveries(user.id)).some((d) =>
-            JSON.stringify(d.payload).includes(later)
-          ),
+        async () => (await deliveries(user.id)).length >= 1,
         10_000
       );
-      expect(await deliveries(user.id)).toHaveLength(2);
+      expect(await deliveries(user.id)).toHaveLength(1);
     }
   );
 });

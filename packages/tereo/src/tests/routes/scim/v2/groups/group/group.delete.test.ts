@@ -2,6 +2,7 @@
 // @module-tag auth
 import { makeUser, manage, tag } from "../../../../../support/scimUsers.js";
 import { createTestRole } from "../../../../../support/auth/users.js";
+import { emittedEvents } from "../../../../../support/outboxLog.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { joinOrg } from "../../../../../support/groups.js";
 import { describe, expect, it } from "vitest";
@@ -68,14 +69,7 @@ describe("DELETE /scim/v2/Groups/:id", () => {
       providerId: c.providerId,
     });
     expect(
-      await prisma.outbox.count({
-        where: {
-          payload: { path: ["entityId"], equals: id },
-          AND: [
-            { payload: { path: ["eventType"], equals: "auth.group.updated" } },
-          ],
-        },
-      })
+      (await emittedEvents(id, "auth.group.updated")).length
     ).toBeGreaterThan(0);
   });
 

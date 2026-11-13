@@ -35,15 +35,21 @@ describe("/v1/admin/branding/clients/:id side effects", () => {
     await deleteBrandingClients(clientIds);
   });
 
-  // emitTx → core.outbox → reaper → fan-out creates the delivery.
-  const deliveries = async (eventType: string, profileId: string) => {
+  // emitTx → core.outbox → reaper → fan-out creates the delivery. The reaper
+  // dispatches rows side by side, so deliveries can land in any order: wait
+  // for all `count` of them.
+  const deliveries = async (
+    eventType: string,
+    profileId: string,
+    count = 1
+  ) => {
     const where = {
       webhookEndpointId: endpointId,
       eventType,
       payload: { path: ["entityId"], equals: profileId },
     };
     await waitFor(
-      async () => (await prisma.webhookDelivery.count({ where })) > 0,
+      async () => (await prisma.webhookDelivery.count({ where })) >= count,
       10_000
     );
     return await prisma.webhookDelivery.findMany({ where });
@@ -91,7 +97,7 @@ describe("/v1/admin/branding/clients/:id side effects", () => {
       },
     });
 
-    const events = await deliveries("auth.branding.updated", profile.id);
+    const events = await deliveries("auth.branding.updated", profile.id, 2);
     expect(events.map((e) => (e.payload as { data: unknown }).data)).toEqual(
       expect.arrayContaining([
         { clientId: client.clientId, changedSlots: ["appName"] },

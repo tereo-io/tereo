@@ -2,6 +2,7 @@
 // @module-tag auth
 import { removeFromOrgGroupsTx } from "../../../../../../utils/groups.js";
 import { SYSTEM_USER_ID } from "../../../../../../definitions/index.js";
+import { emittedEvents } from "../../../../../support/outboxLog.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { pushGroup } from "../../../../../support/scim.js";
 import { tag } from "../../../../../support/scimUsers.js";
@@ -29,11 +30,7 @@ const entries = (groupId: string, detail: string) =>
   });
 
 const eventTypes = async (groupId: string) =>
-  (
-    await prisma.outbox.findMany({
-      where: { payload: { path: ["entityId"], equals: groupId } },
-    })
-  ).map((row) => (row.payload as { eventType?: string }).eventType);
+  (await emittedEvents(groupId)).map((event) => event.eventType);
 
 describe("SCIM group change audit and events", () => {
   it("an organization removal records a skip and moves the link's lastModified", async () => {

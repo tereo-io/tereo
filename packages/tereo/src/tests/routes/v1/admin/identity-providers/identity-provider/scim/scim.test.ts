@@ -2,6 +2,7 @@
 // @module-tag auth
 
 import { SYSTEM_USER_ID } from "../../../../../../../definitions/index.js";
+import { emittedEvents } from "../../../../../../support/outboxLog.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../../support/coreUrl.js";
@@ -473,12 +474,9 @@ describe("/v1/admin/identity-providers/:id/scim", () => {
         reason: "connection_deleted",
         scimConnectionId: c.connectionId,
       });
-      const events = await prisma.outbox.findMany({
-        where: { payload: { path: ["entityId"], equals: groupId } },
-      });
-      expect(JSON.stringify(events.map((e) => e.payload))).toContain(
-        "auth.group.updated"
-      );
+      expect(
+        (await emittedEvents(groupId)).map((event) => event.eventType)
+      ).toContain("auth.group.updated");
     }
   });
 

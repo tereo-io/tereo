@@ -1,6 +1,7 @@
 // @module-tag int
 // @module-tag auth
 import { createTestClient } from "../../../../../support/auth/clients.js";
+import { emittedEvents } from "../../../../../support/outboxLog.js";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { beforeAll, describe, expect, it } from "vitest";
 import {
@@ -146,11 +147,7 @@ describe("DELETE /scim/v2/Users/:id", () => {
 
   describe("the user's pushed groups", () => {
     const events = async (groupId: string) =>
-      (
-        await prisma.outbox.findMany({
-          where: { payload: { path: ["entityId"], equals: groupId } },
-        })
-      ).map((row) => (row.payload as { eventType?: string }).eventType);
+      (await emittedEvents(groupId)).map((event) => event.eventType);
 
     it("removes them from every pushed group, archived ones too, and deletes their skipped records", async () => {
       const c = await orgConnection();
