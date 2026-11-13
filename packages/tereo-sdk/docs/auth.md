@@ -65,6 +65,8 @@ scopes this service defines with `requireScope`.
 | `getUsers(userIds)` | `Map<userId, AuthServiceUser \| null>` — cache misses fetched together, one `GET /v1/admin/users?filter[id]=…&filter[id_op]=in` per 100 ids; a non-UUID id is null | as `getUser` |
 | `validateUserExists(userId)` | `boolean` | as `getUser` |
 | `getOrganization(id)` | `AuthServiceOrganization \| null` (null on 404) — `id` is the JWT `org_id` | 5 min; not-found 60 s |
+| `listUserGroups(userId, { includeArchived }?)` | `UserGroup[] \| null` — the user's groups, global and in any organization, each with its `organization` (null for a global group); archived groups only with `includeArchived`. Null on 404: no such user, or a core that predates groups. `GET /v1/admin/users/:id/groups`; needs `users.read` (`user_resolver`) | None |
+| `getGroup(id)` | `Group \| null` (null on 404), archived or not. `GET /v1/admin/groups/:id`; needs `groups.read`. Without it core answers 403 for every id, existing or not, so the call rejects | None |
 | `invalidateToken(token)` | Nothing. Drops the token's cached introspection, so its next use asks core | — |
 | `invalidateUser(...userIds)` | Nothing. Drops the cached lookup of each user, found or not | — |
 | `invalidateOrganization(...ids)` | Nothing. Drops the cached lookup of each organization, found or not | — |
@@ -73,10 +75,15 @@ scopes this service defines with `requireScope`.
 | `hasPermission(userPermissions, required)` | `boolean` — the hierarchical check `requirePermission` applies. Exported from the package, not a client method | — |
 
 Introspection uses `POST /oauth/introspect` over `CORE_PUBLIC_CLIENT` (the service's credentials as
-Basic auth); users and organizations use `/v1/admin/users/:id` and `/v1/admin/organizations/:id` over
-`CORE_CLIENT`, so the service needs access to read them. Core only reports a token active to this
-service when it was issued to this service's own client, or its audience includes this service's
-slug — an audience in the issuing service's provisioning document (`access.audiences`, see
+Basic auth); users, organizations and groups use `/v1/admin/users/:id`, `/v1/admin/organizations/:id`
+and `/v1/admin/groups/:id` over `CORE_CLIENT`, so the service needs access to read them: the
+requestable core roles `user_resolver` (users, and a user's groups) and `tenant_resolver`
+(organizations) in its provisioning document's `access.roles`; groups need `groups.read`. A
+refusal, or any failure but the 404 that becomes `null`, rejects with a `RequestError` whose
+`httpStatus` is core's answer (undefined when core could not be reached).
+
+Core only reports a token active to this service when it was issued to this service's own client,
+or its audience includes this service's slug — an audience in the issuing service's provisioning document (`access.audiences`, see
 [provisioning](provisioning.md)).
 
 The cache is the Redis passed to `createCoreClient`, under `@tereo-io/sdk:<clientId>:auth-sdk:v1:`,
