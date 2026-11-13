@@ -263,16 +263,20 @@ still counts toward the rate limit.
 `ctx.signal` aborts:
 
 - at the deadline, with a `TimeoutError` as its `reason`;
-- when the client disconnects or cancels the call (the MCP SDK's per-request signal, on both
-  protocol eras);
+- when the client disconnects, on both protocol eras (the MCP SDK's per-request signal);
+- when the client cancels the call, on the 2026 protocol era only. A 2026-era client cancels by
+  aborting the call's own HTTP stream, which reaches the call. A 2025-era (legacy) client cancels
+  by sending `notifications/cancelled` in a separate POST; since a server is built per request,
+  that notification reaches a fresh server with no such call and is dropped. The handler runs on
+  until it returns, throws or reaches its deadline, and is logged with that outcome;
 - when a `listen` server's `close()` begins, including the shutdown on a signal, with an
-  `AbortError`. `router()` has no `close()`, so there the signal aborts only at the deadline or
-  on a disconnect.
+  `AbortError`. `router()` has no `close()`, so there the signal aborts only at the deadline, on
+  a disconnect or on a 2026-era cancel.
 
-A handler that rejects with the abort, after a disconnect or `close()` (the signal's `reason`, or
-any `AbortError`, as `fetch` throws), ends as outcome `cancelled`, logged at info with no `err`;
-a client still connected gets the tool error `Tool call cancelled`. Any other error stays an
-internal error.
+A handler that rejects with the abort, after a disconnect, a cancel or `close()` (the signal's
+`reason`, or any `AbortError`, as `fetch` throws), ends as outcome `cancelled`, logged at info with
+no `err`; a client still connected gets the tool error `Tool call cancelled`. Any other error stays
+an internal error.
 
 A timeout answers the client; it cannot stop a handler that ignores `ctx.signal`, which runs on in
 the background, holding whatever connections and locks it has. Pass the signal to database and
@@ -325,8 +329,8 @@ synchronous and cheap: no async refinements, no lookups.
 | Anything else | `Internal error (request <id>)`, as a tool error | error, with `err`, outcome `internal_error` |
 
 A result over `maxResultBytes` is a tool error too (outcome `tool_error`), as is a call that runs
-past its timeout (outcome `timeout`, logged at warn) and one cancelled by a disconnect or
-`close()` (outcome `cancelled`, logged at info; see
+past its timeout (outcome `timeout`, logged at warn) and one cancelled by a disconnect, a
+2026-era cancel or `close()` (outcome `cancelled`, logged at info; see
 [Timeouts and cancellation](#timeouts-and-cancellation)). The wrapper exists so that a database
 error or a stack detail never reaches the model.
 
