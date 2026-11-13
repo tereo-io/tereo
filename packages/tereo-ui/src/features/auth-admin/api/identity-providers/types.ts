@@ -73,6 +73,12 @@ export interface ScimToken {
   revokedAt: string | null;
 }
 
+/** Where the connection's pushed groups are created. */
+export type ScimGroupsTarget =
+  | { kind: "none" }
+  | { kind: "global" }
+  | { kind: "organization"; organizationId: string };
+
 export interface ScimConnection {
   id: string;
   providerId: string;
@@ -80,6 +86,8 @@ export interface ScimConnection {
   isActive: boolean;
   lastUsedAt: string | null;
   managedUserCount: number;
+  groupsTarget: ScimGroupsTarget;
+  managedGroupCount: number;
   tokens: ScimToken[];
 }
 

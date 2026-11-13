@@ -1,3 +1,4 @@
+export const GROUP_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Group";
 export const USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User";
 export const LIST_RESPONSE_SCHEMA =
   "urn:ietf:params:scim:api:messages:2.0:ListResponse";
@@ -87,7 +88,31 @@ const USER: ResourceDefinition = {
   ],
 };
 
-export const RESOURCES: readonly ResourceDefinition[] = [USER];
+const GROUP: ResourceDefinition = {
+  id: "Group",
+  name: "Group",
+  endpoint: "/Groups",
+  description: "A set of users managed by the identity provider",
+  schema: GROUP_SCHEMA,
+  attributes: [
+    attr("displayName", "string", "Name shown for the group", {
+      required: true,
+    }),
+    attr("externalId", "string", "Identifier the provisioning client uses", {
+      caseExact: true,
+    }),
+    attr("members", "complex", "The users in the group", {
+      multiValued: true,
+      subAttributes: [
+        attr("value", "string", "The user's id"),
+        attr("display", "string", "The user's name"),
+        attr("$ref", "string", "URL of the user"),
+      ],
+    }),
+  ],
+};
+
+export const RESOURCES: readonly ResourceDefinition[] = [USER, GROUP];
 
 const list = (resources: unknown[]) => ({
   schemas: [LIST_RESPONSE_SCHEMA],

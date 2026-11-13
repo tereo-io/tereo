@@ -1,5 +1,7 @@
 import { SYSTEM_USER, SYSTEM_USER_ID } from "../../definitions/index.js";
 import type { Prisma } from "../../../prisma/generated/client/index.js";
+import { leaveScimGroupsTx, lockScimGroupsForUser } from "./groups.js";
+import { afterGroupChange, type GroupChange } from "../groups.js";
 import type { AuthContext } from "../../middleware/auth.js";
 import { uniqueViolationFields } from "../prismaErrors.js";
 import { emailDomain, normalizeEmail } from "../email.js";
@@ -203,7 +205,11 @@ type Write = {
   input: ScimUserInput;
   deletedAt?: Date | null;
   auditMetadata?: Record<string, unknown>;
+  /** Removes the user from the connection's pushed groups before the link is written; gets the change for `afterGroupChange`. */
+  leaveGroups?: (change: LeftGroups) => void;
 };
+
+type LeftGroups = Pick<GroupChange, "affectedUserIds" | "revokedJtis">;
 
 const writeLinkTx = async (
   tx: Tx,
@@ -258,17 +264,36 @@ const settle = async (
   const metadata = { ...auditMetadata(ctx), ...write.auditMetadata };
 
   const recheck = async (tx: Tx) => {
+    await lockFirst(tx);
     if (!sameRows(await relock(tx), target)) throw new StaleTarget();
     await emailChange(ctx, user, write.input, tx);
   };
   let link: ScimUserLink | undefined;
   const writeLink = async (tx: Tx) => {
+    if (write.leaveGroups) {
+      write.leaveGroups(
+        await leaveScimGroupsTx(tx, ctx.connection.id, user.id)
+      );
+    }
     link = await writeLinkTx(tx, ctx, target, write);
+  };
+  // The user's authority lock comes before the last-admin lock and any row
+  // lock on the user, as `lockAuthority` requires: it queues this write
+  // behind an unlink or delete of the same user. A user leaving also locks the
+  // pushed groups they are in, as a group write does, before the last-admin
+  // lock.
+  const lockFirst = async (tx: Tx) => {
+    if (write.leaveGroups) {
+      await lockScimGroupsForUser(tx, ctx.connection.id, user.id);
+    } else {
+      await db.users.lockAuthority(user.id, tx);
+    }
   };
 
   if (change === "deactivate") {
     const updated = await deactivateUser(SYSTEM_ACTOR, user, {
       authorize: async (tx) => {
+        await lockFirst(tx);
         await assertAdminRemains(null, tx);
         await recheck(tx);
       },
@@ -504,12 +529,17 @@ export const patchScimUser = updateScimUser;
 /**
  * The IdP's "this person should no longer have access": an unmanaged user is
  * adopted first. The user and link rows stay; the resource answers 404 after.
+ * The user leaves the connection's pushed groups in the same transaction.
+ * Lock order: the user's authority lock, the pushed groups, the last-admin
+ * lock, the user's row; the same prefix a group write takes.
  */
 export const deleteScimUser = async (
   ctx: ScimContext,
   userId: string
 ): Promise<void> => {
+  let left: LeftGroups | undefined;
   await scimWrite(async () => {
+    left = undefined;
     const found = await findVisible(ctx, userId);
     if (!found) throw notFound();
     return await settle(
@@ -519,10 +549,14 @@ export const deleteScimUser = async (
         input: { active: false },
         deletedAt: new Date(),
         auditMetadata: { action: "scim_deleted" },
+        leaveGroups: (change) => {
+          left = change;
+        },
       },
       relockVisible(ctx, userId)
     );
   });
+  if (left) afterGroupChange(left);
 };
 
 /**
@@ -584,18 +618,25 @@ export const holdScimUserTx = async (
 
 /**
  * The user is then managed locally and excluded from SCIM until released;
- * their state, active or not, is kept. The row stays as that exclusion.
+ * their state, active or not, is kept. The row stays as that exclusion. They
+ * leave the connection's pushed groups in the same transaction, and keep
+ * their local ones. Lock order: the user's authority lock, their row, the
+ * pushed groups, then the last-admin lock inside each removal. Every other
+ * write to the user takes the authority lock before the last-admin lock and
+ * the row (`settle`), so none holds the row while waiting on the guard.
  */
 export const unlinkScimUser = async (
   auth: AuthContext,
   userId: string
 ): Promise<void> => {
-  await db.$transaction(async (tx) => {
+  const left = await db.$transaction(async (tx) => {
+    await db.users.lockAuthority(userId, tx);
     await db.users.lockForSignInChange(userId, tx);
     const user = await db.users.get(userId, tx);
     const link = await db.scim.getManagingLink(userId, tx);
     if (!link) throw new NotFoundError("User is not managed by SCIM");
     const connection = await db.scim.getConnection(link.connectionId, tx);
+    const left = await leaveScimGroupsTx(tx, link.connectionId, userId);
     await db.scim.updateLink(
       link.id,
       { unlinkedAt: new Date(), externalId: null },
@@ -613,7 +654,9 @@ export const unlinkScimUser = async (
         providerId: connection.providerId,
       },
     });
+    return left;
   });
+  afterGroupChange(left);
 };
 
 /**

@@ -20,6 +20,8 @@ interface GroupRolesModalProps {
   /** An organization's group holds custom, org-assignable roles only. */
   organizational: boolean;
   currentRoles: GroupRole[];
+  /** Set for a group a directory pushes: it decides who holds these roles. */
+  providerName?: string;
   show: boolean;
   onClose: () => void;
 }
@@ -28,6 +30,7 @@ const GroupRolesModal = ({
   groupId,
   organizational,
   currentRoles,
+  providerName,
   show,
   onClose,
 }: GroupRolesModalProps) => {
@@ -88,6 +91,12 @@ const GroupRolesModal = ({
         </Alert>
       ) : (
         <>
+          {providerName && (
+            <Alert variant="primary">
+              {providerName} decides who is in this group. Anyone it adds will
+              hold these roles.
+            </Alert>
+          )}
           <CheckboxGroup
             name="group-roles"
             options={assignable.map((role) => ({

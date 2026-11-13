@@ -1,12 +1,19 @@
 import { BadRequestError } from "../errors.js";
 
-export type ScimFilterAttr = "userName" | "externalId" | "email";
-export type ScimFilter = Array<{ attr: ScimFilterAttr; value: string }>;
+export type ScimUserFilterAttr = "userName" | "externalId" | "email";
+export type ScimGroupFilterAttr = "displayName" | "externalId";
+export type ScimFilterAttr = ScimUserFilterAttr | ScimGroupFilterAttr;
+export type ScimFilter = Array<{ attr: ScimUserFilterAttr; value: string }>;
+export type ScimGroupFilter = Array<{
+  attr: ScimGroupFilterAttr;
+  value: string;
+}>;
 
 const MAX_FILTER_LENGTH = 2000;
 
-const ATTR =
+const USER_ATTR =
   /(userName|externalId|emails\.value|emails\[\s*type\s+eq\s+"[^"\\]*"\s*\]\.value)/iy;
+const GROUP_ATTR = /(displayName|externalId)/iy;
 const EQ = /\s+eq\s+/iy;
 const QUOTED = /"((?:[^"\\]|\\.)*)"/y;
 const AND = /\s+and\s+/iy;
@@ -18,6 +25,7 @@ const attrOf = (token: string): ScimFilterAttr => {
   const lower = token.toLowerCase();
   if (lower === "username") return "userName";
   if (lower === "externalid") return "externalId";
+  if (lower === "displayname") return "displayName";
   return "email";
 };
 
@@ -26,19 +34,33 @@ const match = (re: RegExp, s: string, at: number): RegExpExecArray | null => {
   return re.exec(s);
 };
 
-export const parseFilter = (raw: string | undefined): ScimFilter => {
+export function parseFilter(
+  raw: string | undefined,
+  resource?: "User"
+): ScimFilter;
+export function parseFilter(
+  raw: string | undefined,
+  resource: "Group"
+): ScimGroupFilter;
+export function parseFilter(
+  raw: string | undefined,
+  resource: "User" | "Group" = "User"
+): ScimFilter | ScimGroupFilter {
+  const ATTR = resource === "Group" ? GROUP_ATTR : USER_ATTR;
   if (raw === undefined) return [];
   if (raw.length > MAX_FILTER_LENGTH) throw invalid("Filter is too long");
   const s = raw.trim();
   if (s === "") throw invalid("Filter is empty");
 
-  const clauses: ScimFilter = [];
+  const clauses: Array<{ attr: ScimFilterAttr; value: string }> = [];
   let pos = 0;
   for (;;) {
     const attr = match(ATTR, s, pos);
     if (!attr) {
       throw invalid(
-        "Only userName, externalId and emails.value are filterable"
+        resource === "Group"
+          ? "Only displayName and externalId are filterable"
+          : "Only userName, externalId and emails.value are filterable"
       );
     }
     pos = ATTR.lastIndex;
@@ -56,10 +78,10 @@ export const parseFilter = (raw: string | undefined): ScimFilter => {
     }
     clauses.push({ attr: attrOf(attr[1]), value });
 
-    if (pos === s.length) return clauses;
+    if (pos === s.length) return clauses as ScimFilter | ScimGroupFilter;
     if (!match(AND, s, pos)) {
       throw invalid("Clauses can only be joined with and");
     }
     pos = AND.lastIndex;
   }
-};
+}

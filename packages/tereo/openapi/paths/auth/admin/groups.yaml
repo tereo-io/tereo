@@ -4,11 +4,11 @@
       - Admin - Groups
     summary: List groups
     description: |
-      Returns a page of groups, ordered by id, with each group's member count.
+      Returns a page of groups, ordered by id, with each group's member count, `managedBy` and `skippedMemberCount`.
 
       **Filters:**
       - `organizationId`: an organization's id for its groups, or `global` for groups with none
-      - `definitionSource`: `local` (made through this API) or `provisioned` (declared in provisioning documents)
+      - `definitionSource`: `local` (made through this API), `provisioned` (declared in provisioning documents) or `scim` (pushed by an identity provider)
       - `includeArchived`: `true` to list archived groups too; archived groups are left out by default
       - `q`: case-insensitive match on slug or name
 
@@ -32,7 +32,7 @@
         required: false
         schema:
           type: string
-          enum: [local, provisioned]
+          enum: [local, provisioned, scim]
       - name: includeArchived
         in: query
         required: false
@@ -141,7 +141,7 @@
       - Admin - Groups
     summary: Get group
     description: |
-      Returns the group, archived or not, with its member count.
+      Returns the group, archived or not, with its member count, `managedBy` and `skippedMemberCount`.
 
       **Authorization:** `groups.read`, or, for an organization's group, being an
       `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -188,7 +188,9 @@
     description: |
       Changes the group's slug, name or description (at least one). A provisioned group is
       changed only through its provisioning documents (`409 managed_by_provisioning`), and an
-      archived group must be restored first (`409 resource_archived`).
+      archived group must be restored first (`409 resource_archived`). A group an identity
+      provider pushes over SCIM keeps its `name` in the directory: changing it answers
+      `409 managed_by_scim`, while `slug` and `description` stay here.
 
       **Authorization:** `groups.write`, or, for an organization's group, being an
       `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -236,7 +238,7 @@
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
       '409':
         $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
-        description: '`group_slug_taken`, `managed_by_provisioning` or `resource_archived`'
+        description: '`group_slug_taken`, `managed_by_provisioning`, `managed_by_scim` (a name change on a pushed group) or `resource_archived`'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -415,7 +417,8 @@
     summary: Add group members
     description: |
       Adds up to 500 users; those already members are skipped, and `added` lists the rest.
-      Members of a provisioned group are managed here too.
+      Members of a provisioned group are managed here too. A group an identity provider pushes
+      over SCIM refuses this with `409 managed_by_scim`: its members change in the directory.
 
       For an organization's group, each user must first be a member of that organization: any
       other id, unknown ids included, gets `409 not_org_member`, so ids outside the organization
@@ -473,7 +476,7 @@
         description: 'Group not found (to a caller holding the route''s `groups.*` permission; anyone else gets `403`)'
       '409':
         $ref: '../../../components/auth/responses.yaml#/GroupConflictResponse'
-        description: '`not_org_member` (an organization''s group, for any id outside the organization), `guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`, or `resource_archived` (restore the group first)'
+        description: '`not_org_member` (an organization''s group, for any id outside the organization), `guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`, `managed_by_scim` (a pushed group), or `resource_archived` (restore the group first)'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':
@@ -484,7 +487,8 @@
       - Admin - Groups
     summary: Remove group member
     description: |
-      Removes one member, from an archived group too. The same checks as taking roles from the
+      Removes one member, from an archived group too. A group an identity provider pushes over
+      SCIM refuses this with `409 managed_by_scim`. The same checks as taking roles from the
       user directly apply, and removing the last live administrator's only way to admin is
       refused (`409`). An organization `admin` (not `owner`) may not remove one of the
       organization's owners.
@@ -519,7 +523,94 @@
         description: 'Group not found (to a caller holding `groups.write`; anyone else gets `403`), or the user is not a member'
       '409':
         $ref: '../../../components/responses.yaml#/ConflictResponse'
-        description: 'The last administrator would lose admin'
+        description: 'The last administrator would lose admin, or `managed_by_scim` (a pushed group)'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}/scim:
+  delete:
+    tags:
+      - Admin - Groups
+    summary: Unlink a group from SCIM
+    description: |
+      Hands a pushed group back to local management: both sources become `local`, and its
+      members, roles and archive state stay. The directory cannot adopt a group, so its next
+      push creates a new group. The group's recorded skipped members are deleted. 404 when the
+      group is not pushed by SCIM.
+
+      **Authorization:** `groups.write`, or, for an organization's group, being an `admin` or
+      `owner` of that organization (`organizations.write` also passes, as on the organization
+      routes). A global group needs `groups.write`.
+
+      An audit log entry is created for this action (`metadata.action` `scim_unlinked`).
+      An `auth.group.updated` webhook event is emitted.
+    operationId: deleteAdminGroupScim
+    security:
+      - BearerAuth: [groups.write]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+    responses:
+      '204':
+        $ref: '../../../components/responses.yaml#/NoContentResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group)'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found, or not pushed by SCIM'
+      '429':
+        $ref: '../../../components/responses.yaml#/RateLimitResponse'
+      '500':
+        $ref: '../../../components/responses.yaml#/ServerErrorResponse'
+/admin/groups/{id}/scim/skipped-members:
+  get:
+    tags:
+      - Admin - Groups
+    summary: List a pushed group's skipped members
+    description: |
+      Returns the users the directory put in the group whom core could not add, ordered by the
+      record's id and cursor-paginated (`limit` 1-100, default 50). The only reason today is
+      `not_org_member`: the user is not a member of the group's organization. Core never adds
+      them by itself when they join the organization; they are retried on the next request that
+      changes the group's members, and a record the directory removes is deleted. 404 when the
+      group is not pushed by SCIM.
+
+      **Authorization:** `groups.read`, or, for an organization's group, being an `admin` or
+      `owner` of that organization (`organizations.write` also passes).
+    operationId: getAdminGroupScimSkippedMembers
+    security:
+      - BearerAuth: [groups.read]
+    parameters:
+      - $ref: '../../../components/auth/parameters.yaml#/GroupIdParam'
+      - name: cursor
+        in: query
+        required: false
+        description: The `nextCursor` of the previous page (opaque)
+        schema:
+          type: string
+      - $ref: '../../../components/auth/parameters.yaml#/GroupsLimitParam'
+    responses:
+      '200':
+        description: 'A page of skipped members'
+        content:
+          application/json:
+            schema:
+              $ref: '../../../components/auth/schemas.yaml#/ListScimSkippedMembersResponse'
+      '400':
+        $ref: '../../../components/responses.yaml#/BadRequestResponse'
+      '401':
+        $ref: '../../../components/responses.yaml#/UnauthorizedResponse'
+      '403':
+        $ref: '../../../components/responses.yaml#/ForbiddenResponse'
+        description: 'No authority over the group (to a caller without `groups.read`, the same `403` as for a missing group)'
+      '404':
+        $ref: '../../../components/responses.yaml#/NotFoundResponse'
+        description: 'Group not found, or not pushed by SCIM'
       '429':
         $ref: '../../../components/responses.yaml#/RateLimitResponse'
       '500':

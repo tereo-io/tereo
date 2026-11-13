@@ -82,7 +82,7 @@ export const GroupForm = ({
     if (group) {
       const updates: UpdateGroupInput = {};
       if (slug !== group.slug) updates.slug = slug;
-      if (name !== group.name) updates.name = name;
+      if (name !== group.name && !group.managedBy) updates.name = name;
       if (description !== (group.description ?? ""))
         updates.description = description || null;
       onSubmit(updates);
@@ -119,6 +119,10 @@ export const GroupForm = ({
           onChange={(e) => setName(e.target.value)}
           required
           maxLength={255}
+          readOnly={!!group?.managedBy}
+          helperText={
+            group?.managedBy ? "Set by the identity provider." : undefined
+          }
           placeholder="e.g., Support"
           error={issueAt("name")}
         />

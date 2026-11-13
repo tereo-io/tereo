@@ -28,6 +28,8 @@ const MESSAGES: Record<string, string> = {
     "This account's domain requires the provider, so it can't be disconnected.",
   scim_users_exist:
     "SCIM still manages users on this provider. Unlink them first.",
+  scim_groups_exist:
+    "This connection already has groups in another scope. Unlink them or delete them in the directory first.",
   scim_token_limit:
     "Two tokens are already live. Revoke one before generating another.",
 };

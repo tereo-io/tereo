@@ -11,6 +11,10 @@ type Tx = Prisma.TransactionClient;
 
 export type { ScimUserLink };
 
+// A resource the IdP can still address: neither deleted by it nor unlinked
+// by an admin.
+const LIVE = { deletedAt: null, unlinkedAt: null } as const;
+
 export const getConnectionByProvider = async (providerId: string, tx?: Tx) => {
   return await (tx ?? prisma).scimConnection.findUnique({
     where: { providerId },
@@ -32,6 +36,20 @@ export const lockConnection = async (id: string, tx: Tx) => {
   return await tx.scimConnection.findUniqueOrThrow({ where: { id } });
 };
 
+/**
+ * Serializes writers to one connection's groups. `FOR NO KEY UPDATE`, not
+ * `lockConnection`'s `FOR UPDATE`: a SCIM user write inserts a `scim_users`
+ * row, which takes `FOR KEY SHARE` on the connection and must not queue behind
+ * a group write that waits on locks the user write holds.
+ */
+export const lockConnectionForGroups = async (id: string, tx: Tx) => {
+  const locked = await tx.$queryRaw<{ id: string }[]>`
+    SELECT "id" FROM "auth"."scim_connections" WHERE "id" = ${id}::uuid FOR NO KEY UPDATE
+  `;
+  if (locked.length === 0) throw new NotFoundError("SCIM connection not found");
+  return await tx.scimConnection.findUniqueOrThrow({ where: { id } });
+};
+
 export const createConnection = async (
   input: { providerId: string; createdBy: string },
   tx: Tx
@@ -45,6 +63,25 @@ export const setConnectionActive = async (
   tx: Tx
 ) => {
   return await tx.scimConnection.update({ where: { id }, data: { isActive } });
+};
+
+export type GroupsTarget =
+  | { kind: "none" | "global" }
+  | { kind: "organization"; organizationId: string };
+
+export const setGroupsTarget = async (
+  connectionId: string,
+  target: GroupsTarget,
+  tx: Tx
+) => {
+  return await tx.scimConnection.update({
+    where: { id: connectionId },
+    data: {
+      groupsTarget: target.kind,
+      groupsOrganizationId:
+        target.kind === "organization" ? target.organizationId : null,
+    },
+  });
 };
 
 export const deleteConnection = async (id: string, tx: Tx) => {
@@ -168,6 +205,20 @@ export const deleteLink = async (id: string, tx: Tx) => {
   await tx.scimUser.delete({ where: { id } });
 };
 
+/** The ids among `userIds` with a live link (deletedAt and unlinkedAt null) on the connection. */
+export const filterLiveLinked = async (
+  connectionId: string,
+  userIds: string[],
+  tx: Tx
+): Promise<string[]> => {
+  if (userIds.length === 0) return [];
+  const rows = await tx.scimUser.findMany({
+    where: { connectionId, userId: { in: userIds }, ...LIVE },
+    select: { userId: true },
+  });
+  return rows.map((r) => r.userId);
+};
+
 /** Links that manage a user: deleted resources count, unlinked rows do not. */
 export const countLinks = async (connectionId: string, tx?: Tx) => {
   return await (tx ?? prisma).scimUser.count({
@@ -180,10 +231,6 @@ export const deleteUnlinked = async (connectionId: string, tx: Tx) => {
     where: { connectionId, unlinkedAt: { not: null } },
   });
 };
-
-// A resource the IdP can still address: neither deleted by it nor unlinked
-// by an admin.
-const LIVE = { deletedAt: null, unlinkedAt: null } as const;
 
 const isLive = (
   link: Pick<ScimUserLink, "connectionId" | "deletedAt" | "unlinkedAt">,

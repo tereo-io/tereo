@@ -5,7 +5,8 @@
     summary: Get an identity provider's SCIM connection
     description: |
       Returns the provider's SCIM connection with its tokens (never their values) and
-      the number of users it manages. 404 when the provider has no connection.
+      the number of users and groups it manages, and where its pushed groups go
+      (`groupsTarget`). 404 when the provider has no connection.
 
       The SCIM protocol endpoints under `baseUrl` are described in `docs/scim.md`.
     operationId: getAdminScimConnection
@@ -39,12 +40,20 @@
     summary: Create a SCIM connection or switch it on or off
     description: |
       Creates the provider's SCIM connection (201), or sets `isActive` on the existing one
-      (200). While the connection or the provider is inactive, every SCIM call answers 401.
+      (200); `isActive` is required on create and optional on update, where leaving it out
+      keeps the current state. While the connection or the provider is inactive, every SCIM call answers 401.
 
       Creating a connection and setting `isActive: true` need a caller holding `admin`
       through a global role, as `ssoOnly` does (403 otherwise): enabling SCIM lets the
       provider sign in as any user it adopts in its domains. Switching a connection off
       does not.
+
+      `groupsTarget` (optional, also accepted on create) sets where pushed groups are
+      created: `none` (the default; every `/scim/v2/Groups` call answers 403), `global`, or
+      one live organization. Changing it, to `none` included, needs a global `admin` too; a `PUT` repeating the current target needs none.
+      While the connection has linked groups (archived ones included), the target may only
+      be `none` or the scope those groups are in; anything else is `409 scim_groups_exist`.
+      `none` freezes the linked groups until the target is set back to their scope.
 
       An audit log entry is created for a change (`ScimConnection`). No webhook event is emitted.
     operationId: putAdminScimConnection
@@ -94,7 +103,8 @@
       Removes the connection and its tokens. Refused with 409 `scim_users_exist` while it
       manages any user, a deleted SCIM resource included: unlink them first with
       `DELETE /v1/admin/users/{id}/scim`. The exclusions of users unlinked from it are
-      deleted with it.
+      deleted with it. Its pushed groups become local groups (members, roles and archive
+      state kept), each with an `auth.group.updated` event.
 
       An audit log entry is created for this action.
     operationId: deleteAdminScimConnection
@@ -210,7 +220,9 @@
       provider's sign-in no longer claims them, and the IdP cannot adopt them again
       until an admin calls `PUT /v1/admin/users/{id}/scim/release`. The admin user
       response then shows `scimExcluded`. 404 when the user is not managed by SCIM or
-      is already unlinked.
+      is already unlinked. The user also leaves every group the connection pushed, archived
+      ones included, with the usual `members_removed` audit entry and `auth.group.members-removed`
+      event for each.
 
       An audit log entry is created for this action (`metadata.action` `scim_unlinked`).
     operationId: unlinkAdminUserScim

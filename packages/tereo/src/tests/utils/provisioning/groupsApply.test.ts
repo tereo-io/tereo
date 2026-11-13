@@ -237,6 +237,23 @@ describe("applyGroups", () => {
     expect(elsewhere.groups).toEqual([`group:${orgId}/${slug}`]);
   });
 
+  it("refuses a slug a directory-pushed group holds in that scope", async () => {
+    const slug = groupSlug("pushed");
+    slugs.push(slug);
+    await prisma.group.create({
+      data: {
+        slug,
+        name: "Pushed",
+        definitionSource: "scim",
+        createdBy: SYSTEM_USER_ID,
+      },
+    });
+    const problems = await problemsOf(setOf([], [groupSpec({ slug })]));
+    expect(problems).toEqual([
+      `groups.json: groups[${slug}]: a group with slug "${slug}" already exists here and was not created from the provisioning file`,
+    ]);
+  });
+
   it("refuses an organization that is missing or archived", async () => {
     const archivedOrg = await ensureTestOrganization(
       testOrgId(`arch-${rand()}`)

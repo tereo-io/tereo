@@ -12,6 +12,7 @@ const BAD_REQUEST_TYPES: readonly string[] = [
   "invalidSyntax",
   "invalidPath",
   "invalidValue",
+  "tooMany",
 ];
 
 export interface ScimErrorBody {

@@ -28,6 +28,7 @@ import * as permissions from "./permissions.js";
 import * as eventTypes from "./eventTypes.js";
 import * as accessLogs from "./accessLogs.js";
 import * as loginFlows from "./loginFlows.js";
+import * as scimGroups from "./scimGroups.js";
 import * as settings from "./settings.js";
 import * as archives from "./archives.js";
 import * as services from "./services.js";
@@ -72,6 +73,7 @@ export default {
   refreshTokens,
   roles,
   scim,
+  scimGroups,
   scopes,
   settings,
   totp,

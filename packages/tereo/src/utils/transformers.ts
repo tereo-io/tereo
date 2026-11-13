@@ -355,7 +355,15 @@ export const formatWebhookEndpoint = <T extends WebhookEndpointRow>(
 };
 
 /** A group as the admin API returns it. */
-export const formatGroup = (group: Group, memberCount: number) => ({
+export const formatGroup = (
+  group: Group,
+  memberCount: number,
+  scim?: {
+    providerId: string;
+    providerName: string;
+    skippedMemberCount: number;
+  }
+) => ({
   id: group.id,
   organizationId: group.organizationId,
   slug: group.slug,
@@ -368,10 +376,24 @@ export const formatGroup = (group: Group, memberCount: number) => ({
   createdAt: group.createdAt,
   updatedAt: group.updatedAt,
   memberCount,
+  managedBy: scim
+    ? {
+        kind: "scim" as const,
+        providerId: scim.providerId,
+        providerName: scim.providerName,
+      }
+    : null,
+  skippedMemberCount: scim?.skippedMemberCount ?? 0,
 });
 
-/** Groups with their member counts, read in one query. */
+/** Groups with their member counts and SCIM links, read in two queries. */
 export const formatGroups = async (groups: Group[]) => {
-  const counts = await db.groups.countMembers(groups.map((g) => g.id));
-  return groups.map((g) => formatGroup(g, counts.get(g.id) ?? 0));
+  const ids = groups.map((g) => g.id);
+  const [counts, scim] = await Promise.all([
+    db.groups.countMembers(ids),
+    db.scimGroups.summariesForGroups(ids),
+  ]);
+  return groups.map((g) =>
+    formatGroup(g, counts.get(g.id) ?? 0, scim.get(g.id))
+  );
 };

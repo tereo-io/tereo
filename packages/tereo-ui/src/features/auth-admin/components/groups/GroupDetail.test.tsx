@@ -5,6 +5,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Group } from "../../api/groups/types";
 import { GroupDetail } from "./GroupDetail";
 import { authMock } from "@/test/authMock";
+import { toast } from "react-toastify";
+
+vi.mock("react-toastify", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 vi.mock("@/lib/auth", async () =>
   (await import("@/test/authMock")).mockAuthModule()
@@ -23,7 +28,26 @@ const group: Group = {
   createdAt: "2026-10-01T00:00:00Z",
   updatedAt: "2026-10-01T00:00:00Z",
   memberCount: 1,
+  managedBy: null,
+  skippedMemberCount: 0,
 };
+
+const pushed: Group = {
+  ...group,
+  definitionSource: "scim",
+  membershipSource: "scim",
+  managedBy: { kind: "scim", providerId: "p1", providerName: "Okta" },
+};
+
+const skipped = [
+  {
+    userId: "u9",
+    email: "bob@example.com",
+    name: "Bob",
+    reason: "not_org_member" as const,
+    skippedAt: "2026-11-10T00:00:00Z",
+  },
+];
 
 const members = [
   {
@@ -39,7 +63,7 @@ const roles = [
   { id: "r1", name: "agent", displayName: "Agent", serviceId: null },
 ];
 
-type Read = "group" | "members" | "roles" | "allRoles";
+type Read = "group" | "members" | "roles" | "allRoles" | "skipped";
 
 const refusal = (status: number, error_description: string) =>
   Object.assign(new Error(error_description), {
@@ -55,14 +79,21 @@ const renderDetail = (
 ) => {
   authMock.axios.get.mockImplementation(async (url: string) => {
     const path = String(url);
-    const read: Read = path.endsWith("/members")
-      ? "members"
-      : path === "/v1/admin/roles"
-        ? "allRoles"
-        : path.endsWith("/roles")
-          ? "roles"
-          : "group";
+    const read: Read = path.endsWith("/skipped-members")
+      ? "skipped"
+      : path.endsWith("/members")
+        ? "members"
+        : path === "/v1/admin/roles"
+          ? "allRoles"
+          : path.endsWith("/roles")
+            ? "roles"
+            : "group";
     if (failures[read]) throw failures[read];
+    if (read === "skipped") {
+      return {
+        data: { data: skipped, hasMore: false, limit: 50, nextCursor: null },
+      };
+    }
     if (path.endsWith("/members")) {
       return {
         data: { data: members, hasMore: false, limit: 50, nextCursor: null },
@@ -335,5 +366,137 @@ describe("GroupDetail", () => {
         expect.anything()
       );
     });
+  });
+
+  describe("a group pushed by an identity provider", () => {
+    it("says who manages the members and offers no add or remove", async () => {
+      renderDetail(pushed);
+
+      expect(
+        await screen.findByText("Members are managed by Okta.")
+      ).toBeVisible();
+      expect(await screen.findByText("ada@example.com")).toBeVisible();
+      expect(screen.queryByRole("button", { name: "Add members" })).toBeNull();
+      expect(screen.queryByTitle("Remove")).toBeNull();
+      expect(screen.getAllByText("Directory").length).toBeGreaterThan(0);
+    });
+
+    it("keeps editing, roles and archive available", async () => {
+      renderDetail(pushed);
+
+      expect(await screen.findByRole("button", { name: "Edit" })).toBeEnabled();
+      expect(screen.getByTitle("Archive")).toBeVisible();
+      fireEvent.click(screen.getByRole("tab", { name: /^Roles/ }));
+      expect(
+        await screen.findByRole("button", { name: "Edit roles" })
+      ).toBeEnabled();
+    });
+
+    it("lists the skipped members with the way to fix them", async () => {
+      renderDetail({ ...pushed, skippedMemberCount: 1 });
+
+      expect(await screen.findByText("bob@example.com")).toBeVisible();
+      expect(screen.getByText("Skipped members")).toBeVisible();
+      expect(
+        screen.getByText("Not a member of this organization")
+      ).toBeVisible();
+      expect(
+        screen.getByText(
+          "Add them to the organization, then push the group again from the directory."
+        )
+      ).toBeVisible();
+      expect(authMock.axios.get).toHaveBeenCalledWith(
+        "/v1/admin/groups/g1/scim/skipped-members",
+        { params: { limit: 50 } }
+      );
+    });
+
+    it("shows no skipped list when none were skipped", async () => {
+      renderDetail(pushed);
+
+      await screen.findByText("ada@example.com");
+      expect(screen.queryByText("Skipped members")).toBeNull();
+      expect(authMock.axios.get).not.toHaveBeenCalledWith(
+        "/v1/admin/groups/g1/scim/skipped-members",
+        expect.anything()
+      );
+    });
+
+    it("unlinks after confirmation", async () => {
+      authMock.axios.delete.mockResolvedValue({});
+      renderDetail(pushed);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Unlink" }));
+      expect(
+        await screen.findByText(
+          "Unlink this group from Okta? Its members stay, and you manage them here from now on. The directory will no longer update it."
+        )
+      ).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Unlink group" }));
+
+      await waitFor(() =>
+        expect(authMock.axios.delete).toHaveBeenCalledWith(
+          "/v1/admin/groups/g1/scim"
+        )
+      );
+    });
+
+    it("re-reads the group after an unlink", async () => {
+      authMock.axios.delete.mockResolvedValue({});
+      renderDetail(pushed);
+      fireEvent.click(await screen.findByRole("button", { name: "Unlink" }));
+      authMock.axios.get.mockClear();
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Unlink group" })
+      );
+
+      await waitFor(() =>
+        expect(authMock.axios.get).toHaveBeenCalledWith("/v1/admin/groups/g1")
+      );
+    });
+
+    it("keeps the roles note on the roles modal", async () => {
+      renderDetail(pushed);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /^Roles/ }));
+      const edit = await screen.findByRole("button", { name: "Edit roles" });
+      await waitFor(() => expect(edit).toBeEnabled());
+      fireEvent.click(edit);
+
+      expect(
+        await screen.findByText(
+          "Okta decides who is in this group. Anyone it adds will hold these roles."
+        )
+      ).toBeVisible();
+    });
+
+    it("makes the name read-only in the edit modal", async () => {
+      renderDetail(pushed);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+      expect(await screen.findByLabelText(/^Name/)).toHaveAttribute("readonly");
+      expect(screen.getByText("Set by the identity provider.")).toBeVisible();
+      expect(screen.getByLabelText(/^Slug/)).not.toHaveAttribute("readonly");
+    });
+
+    it("offers no unlink without groups.write", async () => {
+      authMock.permissions = ["groups.read"];
+      renderDetail(pushed);
+
+      await screen.findByText("ada@example.com");
+      expect(screen.queryByRole("button", { name: "Unlink" })).toBeNull();
+    });
+  });
+
+  it("shows a local group none of the directory controls", async () => {
+    renderDetail({ ...group, skippedMemberCount: 0 });
+
+    await screen.findByText("ada@example.com");
+    expect(screen.queryByText(/Members are managed by/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Unlink" })).toBeNull();
+    expect(screen.queryByText("Directory")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add members" })).toBeEnabled();
+    expect(toast.error).not.toHaveBeenCalled();
   });
 });

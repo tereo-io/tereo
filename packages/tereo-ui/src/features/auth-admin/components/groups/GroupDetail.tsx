@@ -1,7 +1,8 @@
+import useGroupSkippedMembers from "../../api/groups/useGroupSkippedMembers";
 import ArchiveRestoreGroupButton from "./buttons/ArchiveRestoreGroupButton";
 import RemoveGroupMemberButton from "./buttons/RemoveGroupMemberButton";
 import { errorDescriptionOf, type CoreError } from "@/utils/apiErrors";
-import type { GroupMember, GroupRole } from "../../api/groups/types";
+import UnlinkGroupScimButton from "./buttons/UnlinkGroupScimButton";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { ProvisionedBadge } from "@/components/ProvisionedBadge";
 import { formatDate, formatDateTime } from "@/utils/formatDate";
@@ -19,6 +20,11 @@ import useGroup from "../../api/groups/useGroup";
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import "./styles.css";
+import type {
+  GroupMember,
+  GroupRole,
+  GroupSkippedMember,
+} from "../../api/groups/types";
 import {
   Alert,
   Badge,
@@ -43,6 +49,11 @@ export const GroupDetail = () => {
 
   const { data: group, isLoading, error } = useGroup(id);
   const membersQuery = useGroupMembers(id);
+  const hasSkipped = (group?.skippedMemberCount ?? 0) > 0;
+  const skippedQuery = useGroupSkippedMembers(
+    id,
+    !!group?.managedBy && hasSkipped
+  );
   const {
     data: roles,
     isSuccess: rolesLoaded,
@@ -67,7 +78,13 @@ export const GroupDetail = () => {
     [membersQuery.data]
   );
 
+  const skippedMembers = useMemo(
+    () => skippedQuery.data?.pages.flatMap((p) => p.data) ?? [],
+    [skippedQuery.data]
+  );
+
   const provisioned = group?.definitionSource === "provisioned";
+  const managedBy = group?.managedBy ?? null;
   const archived = !!group?.archivedAt;
   const groupName = group?.name ?? "";
 
@@ -109,8 +126,8 @@ export const GroupDetail = () => {
         cellElement: (member) => formatDate(member.addedAt),
       },
       // Members stay editable on a provisioned group (and removable from an
-      // archived one).
-      ...(canWrite
+      // archived one); a pushed group's change in the directory.
+      ...(canWrite && !managedBy
         ? [
             {
               title: "Actions",
@@ -126,7 +143,23 @@ export const GroupDetail = () => {
           ]
         : []),
     ],
-    [id, groupName, canWrite, canReadUsers]
+    [id, groupName, canWrite, managedBy, canReadUsers]
+  );
+
+  const skippedColumns: TableColumn<GroupSkippedMember>[] = useMemo(
+    () => [
+      { title: "Name", dataKey: "name", cellElement: (m) => m.name || "-" },
+      { title: "Email", dataKey: "email" },
+      {
+        title: "Reason",
+        dataKey: "reason",
+        cellElement: (m) =>
+          m.reason === "not_org_member"
+            ? "Not a member of this organization"
+            : m.reason,
+      },
+    ],
+    []
   );
 
   const roleColumns: TableColumn<GroupRole>[] = useMemo(
@@ -190,10 +223,24 @@ export const GroupDetail = () => {
                 <ProvisionedBadge />
               </>
             )}
+            {managedBy && (
+              <Badge size="sm" subtle variant="primary">
+                Directory
+              </Badge>
+            )}
             {group.archivedAt && <Badge variant="warning">Archived</Badge>}
           </>
         }
         actions={[
+          ...(canWrite && managedBy
+            ? [
+                <UnlinkGroupScimButton
+                  key="unlink"
+                  groupId={id}
+                  providerName={managedBy.providerName}
+                />,
+              ]
+            : []),
           ...(canWrite
             ? [
                 <Button
@@ -245,7 +292,14 @@ export const GroupDetail = () => {
                   "Organization"
                 ),
               },
-              { label: "Source", value: provisioned ? "Provisioned" : "Local" },
+              {
+                label: "Source",
+                value: provisioned
+                  ? "Provisioned"
+                  : managedBy
+                    ? "Directory"
+                    : "Local",
+              },
               {
                 label: "Status",
                 value: (
@@ -278,7 +332,11 @@ export const GroupDetail = () => {
                       <SectionHeader
                         title="Members"
                         actions={
-                          canWrite ? (
+                          managedBy ? (
+                            <span className="v-muted-text">
+                              Members are managed by {managedBy.providerName}.
+                            </span>
+                          ) : canWrite ? (
                             <Button
                               size="sm"
                               disabled={archived}
@@ -314,6 +372,41 @@ export const GroupDetail = () => {
                         >
                           Load more
                         </Button>
+                      )}
+                      {managedBy && hasSkipped && (
+                        <>
+                          <SectionHeader title="Skipped members" />
+                          <p className="v-muted-text">
+                            Add them to the organization, then push the group
+                            again from the directory.
+                          </p>
+                          {skippedQuery.isError &&
+                          skippedMembers.length === 0 ? (
+                            <Alert variant="danger">
+                              {errorDescriptionOf(
+                                skippedQuery.error,
+                                "Could not load the skipped members"
+                              )}
+                            </Alert>
+                          ) : (
+                            <Table<GroupSkippedMember>
+                              rows={skippedMembers}
+                              columns={skippedColumns}
+                              rowKey={(m) => m.userId}
+                              maxHeight="20rem"
+                            />
+                          )}
+                          {skippedQuery.hasNextPage && (
+                            <Button
+                              size="sm"
+                              variant="secondary"
+                              isLoading={skippedQuery.isFetchingNextPage}
+                              onClick={() => skippedQuery.fetchNextPage()}
+                            >
+                              Load more
+                            </Button>
+                          )}
+                        </>
                       )}
                     </Col>
                   ),
@@ -379,6 +472,7 @@ export const GroupDetail = () => {
           groupId={id}
           organizational={!!group.organizationId}
           currentRoles={roles}
+          providerName={managedBy?.providerName}
           show
           onClose={() => setShowRoles(false)}
         />

@@ -1,8 +1,14 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ScimGroupsTarget } from "../../api/identity-providers/types";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { authMock } from "@/test/authMock";
 import { ScimPanel } from "./ScimPanel";
+import { toast } from "react-toastify";
+
+vi.mock("react-toastify", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 vi.mock("@/lib/auth", async () =>
   (await import("@/test/authMock")).mockAuthModule()
@@ -15,6 +21,8 @@ const connection = {
   isActive: true,
   lastUsedAt: "2026-11-10T10:00:00Z",
   managedUserCount: 0,
+  groupsTarget: { kind: "none" } as ScimGroupsTarget,
+  managedGroupCount: 0,
   tokens: [
     {
       id: "t1",
@@ -32,7 +40,19 @@ const notFound = () =>
   });
 
 const renderPanel = (conn: typeof connection | null) => {
-  authMock.axios.get.mockImplementation(async () => {
+  authMock.axios.get.mockImplementation(async (url: string) => {
+    if (url === "/v1/admin/organizations") {
+      return {
+        data: {
+          data: [
+            { id: "o1", name: "Acme" },
+            { id: "o2", name: "Globex" },
+          ],
+          hasMore: false,
+          nextCursor: null,
+        },
+      };
+    }
     if (!conn) throw notFound();
     return { data: conn };
   });
@@ -49,6 +69,7 @@ const renderPanel = (conn: typeof connection | null) => {
 
 beforeEach(() => {
   authMock.permissions = ["admin"];
+  vi.mocked(toast.error).mockReset();
   Object.values(authMock.axios).forEach((fn) => fn.mockReset());
 });
 
@@ -235,5 +256,131 @@ describe("ScimPanel", () => {
     await screen.findByText(connection.baseUrl);
     expect(screen.queryByRole("button", { name: "Generate token" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Remove SCIM" })).toBeNull();
+  });
+
+  describe("the groups target", () => {
+    const groupsField = () => screen.getByLabelText("Groups");
+
+    it("shows the stored target and the managed group count", async () => {
+      renderPanel({
+        ...connection,
+        groupsTarget: { kind: "organization", organizationId: "o1" },
+        managedGroupCount: 4,
+      });
+
+      await screen.findByText(connection.baseUrl);
+      expect(groupsField()).toHaveValue("organization");
+      await waitFor(() =>
+        expect(screen.getByLabelText("Organization")).toHaveValue("o1")
+      );
+      expect(screen.getByText("Managed groups")).toBeVisible();
+      expect(screen.getByText("4")).toBeVisible();
+    });
+
+    it("offers Off, global and an organization's groups", async () => {
+      renderPanel(connection);
+
+      await screen.findByText(connection.baseUrl);
+      expect(groupsField()).toHaveValue("none");
+      expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(
+        expect.arrayContaining([
+          "Off",
+          "Global groups",
+          "An organization's groups",
+        ])
+      );
+      expect(screen.queryByLabelText("Organization")).toBeNull();
+    });
+
+    it("sends the global target at once", async () => {
+      renderPanel(connection);
+      authMock.axios.put.mockResolvedValue({ data: connection });
+
+      await screen.findByText(connection.baseUrl);
+      fireEvent.change(groupsField(), { target: { value: "global" } });
+
+      await waitFor(() =>
+        expect(authMock.axios.put).toHaveBeenCalledWith(
+          "/v1/admin/identity-providers/p1/scim",
+          { groupsTarget: { kind: "global" } }
+        )
+      );
+    });
+
+    it("waits for an organization before sending it", async () => {
+      renderPanel(connection);
+      authMock.axios.put.mockResolvedValue({ data: connection });
+
+      await screen.findByText(connection.baseUrl);
+      fireEvent.change(groupsField(), { target: { value: "organization" } });
+      expect(authMock.axios.put).not.toHaveBeenCalled();
+
+      const picker = await screen.findByLabelText("Organization");
+      await screen.findByRole("option", { name: "Acme" });
+      fireEvent.change(picker, { target: { value: "o2" } });
+
+      await waitFor(() =>
+        expect(authMock.axios.put).toHaveBeenCalledWith(
+          "/v1/admin/identity-providers/p1/scim",
+          {
+            groupsTarget: { kind: "organization", organizationId: "o2" },
+          }
+        )
+      );
+    });
+
+    it("turns the target off", async () => {
+      renderPanel({ ...connection, groupsTarget: { kind: "global" } });
+      authMock.axios.put.mockResolvedValue({ data: connection });
+
+      await screen.findByText(connection.baseUrl);
+      fireEvent.change(groupsField(), { target: { value: "none" } });
+
+      await waitFor(() =>
+        expect(authMock.axios.put).toHaveBeenCalledWith(
+          "/v1/admin/identity-providers/p1/scim",
+          { groupsTarget: { kind: "none" } }
+        )
+      );
+    });
+
+    it("says groups exist in another scope on 409 scim_groups_exist", async () => {
+      renderPanel(connection);
+      authMock.axios.put.mockRejectedValue(
+        Object.assign(new Error("Conflict"), {
+          isAxiosError: true,
+          response: {
+            status: 409,
+            data: { error: "scim_groups_exist", error_description: "raw" },
+          },
+        })
+      );
+
+      await screen.findByText(connection.baseUrl);
+      fireEvent.change(groupsField(), { target: { value: "global" } });
+
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "This connection already has groups in another scope. Unlink them or delete them in the directory first."
+        )
+      );
+      expect(groupsField()).toHaveValue("none");
+    });
+
+    it("is disabled for a caller who is not a global admin", async () => {
+      authMock.permissions = ["identity-providers.write"];
+      renderPanel(connection);
+
+      await screen.findByText(connection.baseUrl);
+      expect(groupsField()).toBeDisabled();
+    });
+
+    it("is disabled without identity-providers.write", async () => {
+      authMock.permissions = ["identity-providers.read"];
+      renderPanel(connection);
+
+      await screen.findByText(connection.baseUrl);
+      expect(groupsField()).toBeDisabled();
+    });
   });
 });

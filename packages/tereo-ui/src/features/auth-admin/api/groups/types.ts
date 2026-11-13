@@ -6,13 +6,16 @@ export interface Group {
   name: string;
   description: string | null;
   /** `provisioned` groups change only in provisioning documents. */
-  definitionSource: "local" | "provisioned";
-  membershipSource: "local";
+  definitionSource: "local" | "provisioned" | "scim";
+  membershipSource: "local" | "scim";
   unprovisionedAt: string | null;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
   memberCount: number;
+  /** The identity provider that pushes this group; null for a group managed here. */
+  managedBy: { kind: "scim"; providerId: string; providerName: string } | null;
+  skippedMemberCount: number;
 }
 
 export interface GroupMember {
@@ -25,6 +28,22 @@ export interface GroupMember {
 
 export interface GroupMembersPage {
   data: GroupMember[];
+  hasMore: boolean;
+  limit: number;
+  nextCursor: string | null;
+}
+
+/** A user the directory put in a pushed group whom core could not add. */
+export interface GroupSkippedMember {
+  userId: string;
+  email: string;
+  name: string | null;
+  reason: "not_org_member";
+  skippedAt: string;
+}
+
+export interface GroupSkippedMembersPage {
+  data: GroupSkippedMember[];
   hasMore: boolean;
   limit: number;
   nextCursor: string | null;

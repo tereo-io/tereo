@@ -54,6 +54,7 @@ model Organization {
   identityProviderDomains IdentityProviderDomain[]
   integrations            Service[]
   groups                  Group[]
+  scimConnections         ScimConnection[]         @relation("ScimConnectionGroupsOrganization")
 
   notifications Notification[]
 
@@ -167,6 +168,7 @@ model User {
   scimConnectionsCreated         ScimConnection[]         @relation("ScimConnectionCreator")
   scimTokensCreated              ScimToken[]              @relation("ScimTokenCreator")
   scimLink                       ScimUser?
+  scimGroupSkips                 ScimGroupSkippedMember[] @relation("ScimGroupSkippedUser")
 
   // Branding
   brandingProfilesUpdated BrandingProfile[] @relation("BrandingProfileUpdater")
@@ -477,6 +479,7 @@ model Group {
   creator      User          @relation("GroupCreator", fields: [createdBy], references: [id], onDelete: Restrict)
   members      GroupMember[]
   roles        GroupRole[]
+  scimLink     ScimGroup?
 
   // Slug uniqueness per scope is enforced via partial unique indexes in migration SQL:
   // - groups_org_slug_key: (organization_id, slug) WHERE organization_id IS NOT NULL
@@ -528,6 +531,7 @@ model GroupRole {
 enum GroupDefinitionSource {
   local
   provisioned
+  scim
 
   @@map("group_definition_source")
   @@schema("auth")
@@ -535,6 +539,7 @@ enum GroupDefinitionSource {
 
 enum GroupMembershipSource {
   local
+  scim
 
   @@map("group_membership_source")
   @@schema("auth")
@@ -851,19 +856,25 @@ model IdentityProvider {
 }
 
 model ScimConnection {
-  id         String    @id @default(uuid(7)) @db.Uuid
-  providerId String    @unique @map("provider_id") @db.Uuid
-  isActive   Boolean   @default(true) @map("is_active")
-  createdBy  String    @map("created_by") @db.Uuid
-  lastUsedAt DateTime? @map("last_used_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  id                   String           @id @default(uuid(7)) @db.Uuid
+  providerId           String           @unique @map("provider_id") @db.Uuid
+  isActive             Boolean          @default(true) @map("is_active")
+  groupsTarget         ScimGroupsTarget @default(none) @map("groups_target")
+  groupsOrganizationId String?          @map("groups_organization_id") @db.Uuid
+  createdBy            String           @map("created_by") @db.Uuid
+  lastUsedAt           DateTime?        @map("last_used_at")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
 
-  provider IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  creator  User             @relation("ScimConnectionCreator", fields: [createdBy], references: [id], onDelete: Restrict)
-  tokens   ScimToken[]
-  users    ScimUser[]
+  provider           IdentityProvider @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  creator            User             @relation("ScimConnectionCreator", fields: [createdBy], references: [id], onDelete: Restrict)
+  groupsOrganization Organization?    @relation("ScimConnectionGroupsOrganization", fields: [groupsOrganizationId], references: [id], onDelete: Restrict)
+  tokens             ScimToken[]
+  users              ScimUser[]
+  groups             ScimGroup[]
 
+  // CHECK in migration SQL:
+  // - scim_connections_groups_target_org: (groups_target = 'organization') = (groups_organization_id IS NOT NULL)
   @@map("scim_connections")
   @@schema("auth")
 }
@@ -907,6 +918,58 @@ model ScimUser {
   @@unique([connectionId, userNameKey], map: "scim_users_connection_user_name_key")
   @@index([connectionId])
   @@map("scim_users")
+  @@schema("auth")
+}
+
+enum ScimGroupsTarget {
+  none
+  global
+  organization
+
+  @@map("scim_groups_target")
+  @@schema("auth")
+}
+
+enum ScimGroupSkipReason {
+  not_org_member
+
+  @@map("scim_group_skip_reason")
+  @@schema("auth")
+}
+
+model ScimGroup {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  connectionId   String   @map("connection_id") @db.Uuid
+  groupId        String   @unique @map("group_id") @db.Uuid
+  externalId     String?  @map("external_id") @db.VarChar(255)
+  displayName    String   @map("display_name") @db.VarChar(255)
+  // `display_name` lower-cased: what the `eq` filter compares. Not unique.
+  displayNameKey String   @map("display_name_key") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  connection ScimConnection           @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  group      Group                    @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  skipped    ScimGroupSkippedMember[]
+
+  @@index([connectionId, displayNameKey])
+  @@index([connectionId, externalId])
+  @@map("scim_groups")
+  @@schema("auth")
+}
+
+model ScimGroupSkippedMember {
+  id          String              @id @default(uuid(7)) @db.Uuid
+  scimGroupId String              @map("scim_group_id") @db.Uuid
+  userId      String              @map("user_id") @db.Uuid
+  reason      ScimGroupSkipReason
+  createdAt   DateTime            @default(now()) @map("created_at")
+
+  scimGroup ScimGroup @relation(fields: [scimGroupId], references: [id], onDelete: Cascade)
+  user      User      @relation("ScimGroupSkippedUser", fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([scimGroupId, userId])
+  @@map("scim_group_skipped_members")
   @@schema("auth")
 }
 

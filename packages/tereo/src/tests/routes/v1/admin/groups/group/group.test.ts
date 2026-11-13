@@ -2,13 +2,26 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../../../../../utils/defaultOrganization.js";
 import { getTestPrincipalToken } from "../../../../../support/principals.js";
+import { createTestUser } from "../../../../../support/auth/users.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createGroup } from "../../../../../../utils/groups.js";
+import { prisma } from "../../../../../../utils/db/prisma.js";
+import { scimFetch } from "../../../../../support/scim.js";
 import db from "../../../../../../utils/db/index.js";
 import {
   HTTP_STATUS,
   NON_EXISTENT_UUID,
 } from "../../../../../support/auth/constants.js";
+import {
+  orgConnection,
+  pushedGroup,
+} from "../../../../../support/scimGroups.js";
+import {
+  joinOrg,
+  roleGranting,
+  ensureGroupPermission,
+  GROUP_PERMISSION,
+} from "../../../../../support/groups.js";
 import {
   adminApi,
   deleteGroups,
@@ -40,7 +53,10 @@ const provisionedGroup = async () => {
 
 beforeAll(async () => {
   await ensureDefaultOrganization();
-  admin = await getTestPrincipalToken({ permissions: ["groups.admin"] });
+  await ensureGroupPermission();
+  admin = await getTestPrincipalToken({
+    permissions: ["groups.admin", GROUP_PERMISSION],
+  });
 });
 
 afterAll(async () => {
@@ -147,5 +163,99 @@ describe("POST /v1/admin/groups/:id/archive and /restore", () => {
     const group = track(await postGroup(admin));
     const res = await adminApi("POST", `/groups/${group.id}/archive`, writer);
     expect(res.status).toBe(HTTP_STATUS.FORBIDDEN);
+  });
+});
+
+describe("admin edits of a SCIM-pushed group", () => {
+  it("reads managedBy and the skipped count", async () => {
+    const c = await orgConnection();
+    const outsider = await createTestUser();
+    const { id } = await pushedGroup(c, [], [outsider.id]);
+
+    const res = await adminApi("GET", `/groups/${id}`, admin);
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    expect(res.body).toMatchObject({
+      managedBy: {
+        kind: "scim",
+        providerId: c.providerId,
+        providerName: "SCIM IdP",
+      },
+      skippedMemberCount: 1,
+    });
+  });
+
+  it("refuses a name change with 409 managed_by_scim but takes slug and description", async () => {
+    const c = await orgConnection();
+    const { id } = await pushedGroup(c, []);
+
+    const refused = await adminApi("PATCH", `/groups/${id}`, admin, {
+      name: "Renamed",
+    });
+    expect(refused.status).toBe(HTTP_STATUS.CONFLICT);
+    expect(refused.body.error).toBe("managed_by_scim");
+
+    const slug = groupSlug("pushed");
+    const ok = await adminApi("PATCH", `/groups/${id}`, admin, {
+      slug,
+      description: "Ours",
+    });
+    expect(ok.status).toBe(HTTP_STATUS.OK);
+    expect(ok.body).toMatchObject({ slug, description: "Ours" });
+    expect(ok.body.managedBy).not.toBeNull();
+  });
+
+  it("lets a groups.admin set roles on, archive and restore a pushed group", async () => {
+    const c = await orgConnection();
+    const { id } = await pushedGroup(c, []);
+    const role = await roleGranting();
+
+    const roles = await adminApi("PUT", `/groups/${id}/roles`, admin, {
+      roleIds: [role.id],
+    });
+    expect(roles.status).toBe(HTTP_STATUS.OK);
+
+    const archived = await adminApi("POST", `/groups/${id}/archive`, admin);
+    expect(archived.status).toBe(HTTP_STATUS.OK);
+    expect(archived.body.archivedAt).not.toBeNull();
+    expect(archived.body.managedBy).not.toBeNull();
+
+    const restored = await adminApi("POST", `/groups/${id}/restore`, admin);
+    expect(restored.status).toBe(HTTP_STATUS.OK);
+    expect(restored.body.archivedAt).toBeNull();
+  });
+
+  it("lets an organization admin set roles on, archive and restore their organization's pushed group", async () => {
+    const c = await orgConnection();
+    const { id } = await pushedGroup(c, []);
+    const orgAdmin = await createTestUser();
+    await joinOrg(c.organizationId, orgAdmin.id, "admin");
+    const token = await getTestPrincipalToken({
+      userId: orgAdmin.id,
+      permissions: [],
+    });
+
+    const roles = await adminApi("PUT", `/groups/${id}/roles`, token, {
+      roleIds: [],
+    });
+    expect(roles.status).toBe(HTTP_STATUS.OK);
+    expect(
+      (await adminApi("POST", `/groups/${id}/archive`, token)).status
+    ).toBe(HTTP_STATUS.OK);
+    expect(
+      (await adminApi("POST", `/groups/${id}/restore`, token)).status
+    ).toBe(HTTP_STATUS.OK);
+  });
+
+  it("reports managedBy null once a SCIM delete has removed the link", async () => {
+    const c = await orgConnection();
+    const { id } = await pushedGroup(c, []);
+    const del = await scimFetch(c.token, "DELETE", `/scim/v2/Groups/${id}`);
+    expect(del.status).toBe(204);
+
+    const res = await adminApi("GET", `/groups/${id}`, admin);
+    expect(res.status).toBe(HTTP_STATUS.OK);
+    expect(res.body.managedBy).toBeNull();
+    expect(res.body.archivedAt).not.toBeNull();
+    expect(await prisma.scimGroup.count({ where: { groupId: id } })).toBe(0);
   });
 });

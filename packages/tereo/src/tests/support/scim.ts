@@ -77,3 +77,28 @@ export const scimFetch = async (
   const text = await response.text();
   return { status: response.status, body: text ? JSON.parse(text) : null };
 };
+
+export const setGroupsTarget = async (
+  connectionId: string,
+  target:
+    | { kind: "none" | "global" }
+    | { kind: "organization"; organizationId: string }
+) => {
+  await prisma.scimConnection.update({
+    where: { id: connectionId },
+    data: {
+      groupsTarget: target.kind,
+      groupsOrganizationId:
+        target.kind === "organization" ? target.organizationId : null,
+    },
+  });
+};
+
+export const pushGroup = async (
+  token: string,
+  body: {
+    displayName: string;
+    externalId?: string;
+    members?: Array<{ value: string }>;
+  }
+) => await scimFetch(token, "POST", "/scim/v2/Groups", body);

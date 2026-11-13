@@ -28,6 +28,7 @@ import {
   ConflictError,
   ForbiddenError,
   ManagedByProvisioningError,
+  ManagedByScimError,
   NotArchivedError,
 } from "./errors.js";
 
@@ -37,10 +38,14 @@ import {
  * Callers own the transaction (provisioning applies many changes in one) and
  * call `afterGroupChange` once it commits.
  *
- * Lock order, in each transaction:
+ * Lock order, in each transaction. A directory's group writers take the SCIM
+ * connection row (`FOR NO KEY UPDATE`) before step 1; nothing takes a
+ * connection row lock after an authority or group lock.
  * 1. `lockAuthority` for every user whose authority changes, ascending id:
  *    the users added or removed, or for a change to the group's roles (and
- *    archive and restore) every current member.
+ *    archive and restore) every current member. A directory's `scim` addition
+ *    re-reads which ids have a live link only after this step, so a user
+ *    unlinked or deleted meanwhile is dropped.
  * 2. `lockGroup`.
  * 3. For role changes, archive and restore: the members re-read, and the
  *    authority of any not locked in step 1 locked. Such a user was added by
@@ -76,7 +81,8 @@ export type GroupActor =
       /** The caller's membership role in the group's org, when they act as one. */
       callerOrgRole: OrgMemberRole | null;
     }
-  | { mode: "provisioning" };
+  | { mode: "provisioning" }
+  | { mode: "scim"; connectionId: string; reason?: "scim_user_left" };
 
 export interface GroupChange {
   group: Group;
@@ -92,7 +98,7 @@ export interface CreateGroupInput {
   name: string;
   description?: string | null;
   roleIds?: string[];
-  definitionSource?: "local" | "provisioned";
+  definitionSource?: "local" | "provisioned" | "scim";
 }
 
 export interface UpdateGroupPatch {
@@ -110,6 +116,10 @@ const auditActor = (actor: GroupActor): AuditActor =>
 
 const actorUserId = (actor: GroupActor): string =>
   actor.mode === "admin" ? actor.auth.userId : SYSTEM_USER_ID;
+
+/** Audit detail naming the connection a directory-driven change came through. */
+const scimDetail = (actor: GroupActor) =>
+  actor.mode === "scim" ? { scimConnectionId: actor.connectionId } : {};
 
 const unique = (ids: string[]): string[] => [...new Set(ids)].sort();
 
@@ -151,7 +161,8 @@ const requiresLive2fa = (
     (r) => r.requires2fa && r.isActive && !r.archivedAt && !r.retiredAt
   );
 
-const lockUsers = async (ids: Iterable<string>, tx: Tx) => {
+/** Authority locks for these users, ascending; re-entrant within a transaction. */
+export const lockMemberAuthorities = async (ids: Iterable<string>, tx: Tx) => {
   for (const id of [...new Set(ids)].sort()) {
     await db.users.lockAuthority(id, tx);
   }
@@ -160,7 +171,7 @@ const lockUsers = async (ids: Iterable<string>, tx: Tx) => {
 /** Lock step 1 for a change to every member: returns those locked. */
 const lockCurrentMembers = async (groupId: string, tx: Tx) => {
   const locked = new Set(await db.groups.getMemberIds(groupId, tx));
-  await lockUsers(locked, tx);
+  await lockMemberAuthorities(locked, tx);
   return locked;
 };
 
@@ -171,7 +182,7 @@ const lockLateMembers = async (
   tx: Tx
 ): Promise<string[]> => {
   const members = await db.groups.getMemberIds(groupId, tx);
-  await lockUsers(
+  await lockMemberAuthorities(
     members.filter((id) => !locked.has(id)),
     tx
   );
@@ -182,6 +193,18 @@ const assertNotProvisioned = (actor: GroupActor, group: Group) => {
   if (actor.mode === "admin" && group.definitionSource === "provisioned") {
     throw new ManagedByProvisioningError(
       "This group is managed by provisioning; change it in the provisioning documents"
+    );
+  }
+};
+
+const assertNotScimManaged = (
+  actor: GroupActor,
+  group: Group,
+  what: string
+) => {
+  if (actor.mode === "admin" && group.membershipSource === "scim") {
+    throw new ManagedByScimError(
+      `This group's ${what} are managed by the identity provider's SCIM connection; change them there`
     );
   }
 };
@@ -394,7 +417,9 @@ export const createGroup = async (
   const definitionSource =
     actor.mode === "admin"
       ? "local"
-      : (input.definitionSource ?? "provisioned");
+      : actor.mode === "scim"
+        ? "scim"
+        : (input.definitionSource ?? "provisioned");
   const group = await db.groups.create(
     {
       organizationId: input.organizationId,
@@ -402,11 +427,12 @@ export const createGroup = async (
       name: input.name,
       description: input.description ?? null,
       definitionSource,
+      ...(actor.mode === "scim" && { membershipSource: "scim" as const }),
       createdBy,
     },
     tx
   );
-  const roleIds = unique(input.roleIds ?? []);
+  const roleIds = actor.mode === "scim" ? [] : unique(input.roleIds ?? []);
   if (roleIds.length > 0) {
     await checkAddedRoles(actor, group, roleIds, tx);
     await db.groups.replaceRoles(group.id, roleIds, createdBy, tx);
@@ -420,6 +446,7 @@ export const createGroup = async (
     entityName: group.slug,
     metadata: {
       definitionSource,
+      ...scimDetail(actor),
       ...(roleIds.length > 0 && { roleIds }),
     },
   });
@@ -451,6 +478,9 @@ export const updateGroup = async (
   const data = Object.fromEntries(
     Object.entries(patch).filter(([, v]) => v !== undefined)
   ) as UpdateGroupPatch;
+  if (data.name !== undefined && data.name !== existing.name) {
+    assertNotScimManaged(actor, existing, "names");
+  }
   const changes = computeChanges(editable(existing), {
     ...editable(existing),
     ...data,
@@ -466,6 +496,7 @@ export const updateGroup = async (
     entityId: group.id,
     entityName: group.slug,
     changes,
+    ...(actor.mode === "scim" && { metadata: scimDetail(actor) }),
   });
   await emitGroupEvent(tx, group, "auth.group.updated");
   return { group, affectedUserIds: [], revokedJtis: [] };
@@ -476,16 +507,45 @@ export const addMembers = async (
   groupId: string,
   userIds: string[],
   tx: Tx
-): Promise<GroupChange & { added: string[] }> => {
-  const ids = unique(userIds);
-  await lockUsers(ids, tx);
+): Promise<
+  GroupChange & { added: string[]; skipped: string[]; dropped: number }
+> => {
+  let ids = unique(userIds);
+  await lockMemberAuthorities(ids, tx);
   await db.groups.lockGroup(groupId, tx);
   const group = await db.groups.getAny(groupId, tx);
-  if (group.archivedAt) {
+  assertNotScimManaged(actor, group, "members");
+  if (group.archivedAt && actor.mode !== "scim") {
     throw new ArchivedError(
       "Group is archived; restore it before adding members"
     );
   }
+
+  // Liveness is read under the authority locks, so an unlink or deletion
+  // committed since the caller looked is seen.
+  let dropped = 0;
+  if (actor.mode === "scim") {
+    const live = new Set(
+      await db.scim.filterLiveLinked(actor.connectionId, ids, tx)
+    );
+    dropped = ids.length - live.size;
+    ids = ids.filter((id) => live.has(id));
+    // One ineligible member must not fail a directory push: left out too.
+    const ineligible = new Set(
+      (await tx.user.findMany({ where: { id: { in: ids } } }))
+        .filter(
+          (u) =>
+            u.id === SYSTEM_USER_ID ||
+            u.userType === "guest" ||
+            u.userType === "service_account" ||
+            u.oauthClientId !== null
+        )
+        .map((u) => u.id)
+    );
+    dropped += ineligible.size;
+    ids = ids.filter((id) => !ineligible.has(id));
+  }
+  const skipped: string[] = [];
 
   // For an org group, membership first: an id outside the organization is
   // refused the same way whatever it names, so an org admin cannot tell an
@@ -500,7 +560,10 @@ export const addMembers = async (
       ).map((m) => m.userId)
     );
     const outside = ids.filter((id) => !members.has(id));
-    if (outside.length > 0) {
+    if (actor.mode === "scim") {
+      skipped.push(...outside);
+      ids = ids.filter((id) => members.has(id));
+    } else if (outside.length > 0) {
       throw new ConflictError(
         `Not members of the group's organization: ${outside.join(", ")}`,
         "not_org_member"
@@ -553,21 +616,28 @@ export const addMembers = async (
   // Permissions are read live, so a token from a password-only login would
   // carry the group's role; revoked, its refresh meets the step-up.
   const revokedJtis =
-    added.length > 0 && requiresLive2fa(roles)
+    added.length > 0 && !group.archivedAt && requiresLive2fa(roles)
       ? await db.accessTokens.revokeWithoutMfa({ id: { in: added } }, tx)
       : [];
   if (added.length > 0) {
-    await membersAudit(
-      tx,
-      auditActor(actor),
-      group,
-      "members_added",
-      added,
-      revokedJtis.length > 0 ? { accessTokensRevoked: revokedJtis.length } : {}
-    );
+    await membersAudit(tx, auditActor(actor), group, "members_added", added, {
+      ...(revokedJtis.length > 0 && {
+        accessTokensRevoked: revokedJtis.length,
+      }),
+      ...scimDetail(actor),
+      ...(skipped.length > 0 && { skipped: skipped.length }),
+      ...(dropped > 0 && { dropped }),
+    });
     await emitMembersEvents(tx, group, "auth.group.members-added", added);
   }
-  return { group, affectedUserIds: added, revokedJtis, added };
+  return {
+    group,
+    affectedUserIds: group.archivedAt ? [] : added,
+    revokedJtis,
+    added,
+    skipped,
+    dropped,
+  };
 };
 
 export const removeMembers = async (
@@ -577,15 +647,21 @@ export const removeMembers = async (
   tx: Tx
 ): Promise<GroupChange & { removed: string[] }> => {
   // A group's organization never changes, so it can be read before the locks.
-  const { organizationId } = await db.groups.getAny(groupId, tx);
-  await lockUsers(unique(userIds), tx);
+  const first = await db.groups.getAny(groupId, tx);
+  const { organizationId } = first;
+  // Before the disempower guard below, so an admin sees the pushed group's
+  // refusal and not a 403 that says nothing of why.
+  assertNotScimManaged(actor, first, "members");
+  await lockMemberAuthorities(unique(userIds), tx);
   // Every writer to these users' memberships holds their authority lock, so
   // who of them is a member holds until commit. Non-members are left out
   // before any check, so naming one is a plain no-op (a 404 for the route).
   const ids = unique(await db.groups.getMemberIdsAmong(groupId, userIds, tx));
   if (ids.length === 0) {
+    const current = await db.groups.getAny(groupId, tx);
+    assertNotScimManaged(actor, current, "members");
     return {
-      group: await db.groups.getAny(groupId, tx),
+      group: current,
       affectedUserIds: [],
       revokedJtis: [],
       removed: [],
@@ -601,6 +677,7 @@ export const removeMembers = async (
   }
   await db.groups.lockGroup(groupId, tx);
   const group = await db.groups.getAny(groupId, tx);
+  assertNotScimManaged(actor, group, "members");
   await assertOrgAdminSparesOwners(actor, group, ids, tx);
   if (actor.mode === "admin" && group.organizationId) {
     assertCanTakeAway(
@@ -622,7 +699,11 @@ export const removeMembers = async (
       auditActor(actor),
       group,
       "members_removed",
-      removed
+      removed,
+      {
+        ...scimDetail(actor),
+        ...(actor.mode === "scim" && actor.reason && { reason: actor.reason }),
+      }
     );
     await emitMembersEvents(tx, group, "auth.group.members-removed", removed);
   }
@@ -758,6 +839,7 @@ export const archiveGroup = async (
     entityType: "Group",
     entityId: archived.id,
     entityName: archived.slug,
+    ...(actor.mode === "scim" && { metadata: scimDetail(actor) }),
   });
   await emitGroupEvent(tx, archived, "auth.group.archived");
   return { group: archived, affectedUserIds: memberIds, revokedJtis: [] };
@@ -840,6 +922,13 @@ export const removeFromOrgGroupsTx = async (
     const group = await db.groups.getAny(groupId, tx);
     const removed = await db.groups.removeMembers(groupId, [userId], tx);
     if (removed.length === 0) continue;
+    if (group.membershipSource === "scim") {
+      const link = await db.scimGroups.getLinkByGroup(groupId, tx);
+      if (link) {
+        await db.scimGroups.addSkipped(link.id, userId, "not_org_member", tx);
+        await db.scimGroups.touchLink(link.id, tx);
+      }
+    }
     await membersAudit(tx, auth, group, "members_removed", removed, {
       reason: "organization_member_removed",
     });

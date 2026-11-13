@@ -1,0 +1,545 @@
+import type { Group } from "../../../prisma/generated/client/index.js";
+import { resolveGroupOps, type GroupPatchOp } from "./groupPatch.js";
+import { SYSTEM_USER_ID } from "../../definitions/index.js";
+import type { ScimGroupLink } from "../db/scimGroups.js";
+import { prisma, type Prisma } from "../db/prisma.js";
+import type { ScimGroupFilter } from "./filter.js";
+import type { ScimContext } from "./context.js";
+import { logAuditTx } from "../outbox.js";
+import db from "../db/index.js";
+import {
+  MAX_GROUP_MEMBERS,
+  MAX_MEMBER_CHANGES,
+  slugFromDisplayName,
+  UUID_SHAPE,
+  withSlugSuffix,
+  type ScimGroupInput,
+} from "./groupMapping.js";
+import {
+  addMembers,
+  afterGroupChange,
+  archiveGroup,
+  createGroup,
+  emitGroupEvent,
+  lockMemberAuthorities,
+  removeMembers,
+  updateGroup,
+  type AuditActor,
+  type GroupActor,
+  type GroupChange,
+} from "../groups.js";
+import {
+  AlreadyArchivedError,
+  BadRequestError,
+  ConflictError,
+  ForbiddenError,
+  NotFoundError,
+} from "../errors.js";
+
+type Tx = Prisma.TransactionClient;
+
+export interface ScimGroupView {
+  link: ScimGroupLink;
+  group: Group;
+  members?: Array<{ id: string; name: string | null }>;
+}
+
+const SYSTEM_ACTOR: AuditActor = { userId: SYSTEM_USER_ID, email: null };
+// Retries of a create that lost its slug to a writer outside the directory.
+const SLUG_RACE_ATTEMPTS = 5;
+
+const notFound = () => new NotFoundError("Group not found");
+
+const actorOf = (ctx: ScimContext): GroupActor => ({
+  mode: "scim",
+  connectionId: ctx.connection.id,
+});
+
+const requireEnabled = (target: string) => {
+  if (target === "none") {
+    throw new ForbiddenError("Groups are not enabled for this connection");
+  }
+};
+
+const findLink = async (ctx: ScimContext, groupId: string, tx?: Tx) => {
+  if (!UUID_SHAPE.test(groupId)) throw notFound();
+  const link = await db.scimGroups.getLinkForConnection(
+    ctx.connection.id,
+    groupId.toLowerCase(),
+    tx
+  );
+  if (!link) throw notFound();
+  return link;
+};
+
+const membersOf = async (groupId: string, tx?: Tx) => {
+  const rows = await (tx ?? prisma).groupMember.findMany({
+    where: { groupId },
+    orderBy: { userId: "asc" },
+    select: { user: { select: { id: true, name: true } } },
+  });
+  return rows.map((r) => r.user);
+};
+
+interface MemberDiff {
+  toAdd: string[];
+  toRemove: string[];
+}
+
+/**
+ * What turns `current` into `desired`. The caps apply to what the request
+ * itself names first; recorded skips it does not name are then retried within
+ * the budget left, lowest id first, and the rest stay recorded.
+ */
+const diffMembers = (
+  current: string[],
+  desired: Set<string>,
+  named: Set<string>
+): MemberDiff => {
+  const have = new Set(current);
+  const toRemove = current.filter((id) => !desired.has(id)).sort();
+  const pending = [...desired].filter((id) => !have.has(id)).sort();
+  const toAdd = pending.filter((id) => named.has(id));
+  if (toAdd.length + toRemove.length > MAX_MEMBER_CHANGES) {
+    throw new BadRequestError(
+      "tooMany",
+      `A request changes at most ${MAX_MEMBER_CHANGES} memberships`
+    );
+  }
+  const size = current.length - toRemove.length + toAdd.length;
+  if (size > MAX_GROUP_MEMBERS) {
+    throw new BadRequestError(
+      "tooMany",
+      `A group holds at most ${MAX_GROUP_MEMBERS} members`
+    );
+  }
+  const room = Math.min(
+    MAX_MEMBER_CHANGES - toAdd.length - toRemove.length,
+    MAX_GROUP_MEMBERS - size
+  );
+  const retried = pending.filter((id) => !named.has(id)).slice(0, room);
+  return { toAdd: [...toAdd, ...retried], toRemove };
+};
+
+const assertRequestSize = (values: string[]) => {
+  if (values.length > MAX_GROUP_MEMBERS) {
+    throw new BadRequestError(
+      "tooMany",
+      `A request may name at most ${MAX_GROUP_MEMBERS} members`
+    );
+  }
+};
+
+const uuidSet = (values: string[]) =>
+  new Set(values.filter((v) => UUID_SHAPE.test(v)).map((v) => v.toLowerCase()));
+
+interface MemberOutcome {
+  changes: GroupChange[];
+  membersChanged: boolean;
+}
+
+interface SkipState {
+  /** The group's skip records, read under the locks. */
+  recorded: string[];
+  desired: Set<string>;
+}
+
+/**
+ * Removes, then adds, and settles the skip records: those the request retried
+ * or dropped from the desired set are replaced by exactly what `addMembers`
+ * skipped; the others stay. A `members_skipped` entry is written only when
+ * nobody was added and the records changed.
+ */
+const applyDiff = async (
+  tx: Tx,
+  ctx: ScimContext,
+  link: ScimGroupLink,
+  { toAdd, toRemove }: MemberDiff,
+  state: SkipState
+): Promise<MemberOutcome> => {
+  const changes: GroupChange[] = [];
+  let membersChanged = false;
+  if (toRemove.length > 0) {
+    const removed = await removeMembers(
+      actorOf(ctx),
+      link.groupId,
+      toRemove,
+      tx
+    );
+    changes.push(removed);
+    membersChanged ||= removed.removed.length > 0;
+  }
+  let skipped: string[] = [];
+  let added: string[] = [];
+  let dropped = 0;
+  if (toAdd.length > 0) {
+    const result = await addMembers(actorOf(ctx), link.groupId, toAdd, tx);
+    changes.push(result);
+    added = result.added;
+    membersChanged ||= added.length > 0;
+    skipped = result.skipped;
+    dropped = result.dropped;
+  }
+  const retried = new Set(toAdd);
+  const resolved = state.recorded.filter(
+    (id) => !state.desired.has(id) || retried.has(id)
+  );
+  await db.scimGroups.setSkipped(
+    link.id,
+    skipped,
+    "not_org_member",
+    tx,
+    resolved
+  );
+  const gone = new Set(resolved);
+  const after = new Set([
+    ...state.recorded.filter((id) => !gone.has(id)),
+    ...skipped,
+  ]);
+  const before = new Set(state.recorded);
+  const recordsChanged =
+    after.size !== before.size || [...after].some((id) => !before.has(id));
+  if (added.length === 0 && recordsChanged) {
+    const group = await db.groups.getAny(link.groupId, tx);
+    await logAuditTx(tx, {
+      auth: SYSTEM_ACTOR,
+      organizationId: group.organizationId,
+      action: "UPDATE",
+      entityType: "Group",
+      entityId: group.id,
+      entityName: group.slug,
+      metadata: {
+        action: "members_skipped",
+        scimConnectionId: ctx.connection.id,
+        skipped: skipped.length,
+        dropped,
+      },
+    });
+  }
+  return { changes, membersChanged };
+};
+
+export const createScimGroup = async (
+  ctx: ScimContext,
+  input: ScimGroupInput
+): Promise<ScimGroupView> => {
+  requireEnabled(ctx.connection.groupsTarget);
+  const base = slugFromDisplayName(input.displayName);
+  // Every suffixed candidate starts with the base cut to leave room for the
+  // longest suffix.
+  const prefix = withSlugSuffix(base, 99999).slice(0, -"-99999".length);
+  for (let attempt = 1; attempt <= SLUG_RACE_ATTEMPTS; attempt++) {
+    try {
+      const { view, changes } = await db.$transaction(async (tx) => {
+        const connection = await db.scim.lockConnectionForGroups(
+          ctx.connection.id,
+          tx
+        );
+        requireEnabled(connection.groupsTarget);
+        const organizationId =
+          connection.groupsTarget === "organization"
+            ? connection.groupsOrganizationId
+            : null;
+        const taken = await db.groups.slugsStartingWith(
+          organizationId,
+          prefix,
+          tx
+        );
+        let n = 1;
+        let slug = base;
+        while (taken.has(slug)) slug = withSlugSuffix(base, ++n);
+        const created = await createGroup(
+          actorOf(ctx),
+          {
+            organizationId,
+            slug,
+            name: input.displayName,
+          },
+          tx
+        );
+        const link = await db.scimGroups.createLink(
+          {
+            connectionId: connection.id,
+            groupId: created.group.id,
+            externalId: input.externalId,
+            displayName: input.displayName,
+          },
+          tx
+        );
+        assertRequestSize(input.members);
+        const wanted = uuidSet(input.members);
+        const diff = diffMembers([], wanted, wanted);
+        const applied = await applyDiff(tx, ctx, link, diff, {
+          recorded: [],
+          desired: wanted,
+        });
+        return {
+          view: {
+            link: await findLink(ctx, created.group.id, tx),
+            group: await db.groups.getAny(created.group.id, tx),
+            members: await membersOf(created.group.id, tx),
+          },
+          changes: [created, ...applied.changes],
+        };
+      });
+      for (const change of changes) afterGroupChange(change);
+      return view;
+    } catch (err) {
+      if (err instanceof ConflictError && err.code === "group_slug_taken") {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new ConflictError("No free slug for this group name");
+};
+
+export const getScimGroup = async (
+  ctx: ScimContext,
+  groupId: string,
+  opts: { members: boolean }
+): Promise<ScimGroupView> => {
+  requireEnabled(ctx.connection.groupsTarget);
+  const link = await findLink(ctx, groupId);
+  const group = await db.groups.getAny(link.groupId);
+  return {
+    link,
+    group,
+    ...(opts.members && { members: await membersOf(group.id) }),
+  };
+};
+
+export const listScimGroups = async (
+  ctx: ScimContext,
+  query: { filter: ScimGroupFilter; startIndex: number; count: number }
+): Promise<{ views: ScimGroupView[]; total: number }> => {
+  requireEnabled(ctx.connection.groupsTarget);
+  const { links, total } = await db.scimGroups.listLinks(ctx.connection.id, {
+    filter: query.filter,
+    skip: query.startIndex - 1,
+    take: query.count,
+  });
+  return {
+    views: links.map(({ group, ...link }) => ({ link, group })),
+    total,
+  };
+};
+
+/** Makes a linked group local: sources to `local`, link and skipped rows deleted, members kept. Caller holds the group lock. */
+export const unlinkScimGroupTx = async (
+  tx: Tx,
+  auth: AuditActor,
+  groupId: string,
+  reason: "admin" | "scim_deleted" | "connection_deleted"
+): Promise<Group> => {
+  const link = await db.scimGroups.getLinkWithProvider(groupId, tx);
+  if (!link) throw notFound();
+  const group = await db.groups.setSources(
+    groupId,
+    { definitionSource: "local", membershipSource: "local" },
+    tx
+  );
+  await db.scimGroups.deleteLink(link.id, tx);
+  await logAuditTx(tx, {
+    auth,
+    organizationId: group.organizationId,
+    action: "UPDATE",
+    entityType: "Group",
+    entityId: group.id,
+    entityName: group.slug,
+    metadata: {
+      action: "scim_unlinked",
+      reason,
+      scimConnectionId: link.connectionId,
+      providerId: link.connection.providerId,
+    },
+  });
+  await emitGroupEvent(tx, group, "auth.group.updated");
+  return group;
+};
+
+export const deleteScimGroup = async (
+  ctx: ScimContext,
+  groupId: string
+): Promise<void> => {
+  requireEnabled(ctx.connection.groupsTarget);
+  const link = await findLink(ctx, groupId);
+  const change = await db.$transaction(async (tx) => {
+    let archived: GroupChange | null = null;
+    const group = await db.groups.getAny(link.groupId, tx);
+    if (!group.archivedAt) {
+      try {
+        archived = await archiveGroup(actorOf(ctx), link.groupId, tx);
+      } catch (err) {
+        if (!(err instanceof AlreadyArchivedError)) throw err;
+      }
+    }
+    await db.groups.lockGroup(link.groupId, tx);
+    await unlinkScimGroupTx(tx, SYSTEM_ACTOR, link.groupId, "scim_deleted");
+    return archived;
+  });
+  if (change) afterGroupChange(change);
+};
+
+const mergeChanges = (group: Group, changes: GroupChange[]): GroupChange => ({
+  group,
+  affectedUserIds: [...new Set(changes.flatMap((c) => c.affectedUserIds))],
+  revokedJtis: changes.flatMap((c) => c.revokedJtis),
+});
+
+/**
+ * One transaction for a PUT or PATCH. The connection lock comes first, as in
+ * `createScimGroup`, so requests on one connection run one after another and
+ * each reads the members it diffs against after the previous one committed.
+ * Then, in the order the header of `utils/groups.ts` gives: authority locks
+ * for every member added or removed in one ascending pass, then the group.
+ */
+const changeScimGroup = async (
+  ctx: ScimContext,
+  groupId: string,
+  ops: GroupPatchOp[]
+): Promise<ScimGroupView> => {
+  requireEnabled(ctx.connection.groupsTarget);
+  if (ops.length === 0) {
+    return await getScimGroup(ctx, groupId, { members: true });
+  }
+  const { view, changes } = await db.$transaction(async (tx) => {
+    const connection = await db.scim.lockConnectionForGroups(
+      ctx.connection.id,
+      tx
+    );
+    requireEnabled(connection.groupsTarget);
+    const link = await findLink(ctx, groupId, tx);
+    const current = await db.groups.getMemberIds(link.groupId, tx);
+    const recorded = await db.scimGroups.listSkippedIds(link.id, tx);
+    const plan = resolveGroupOps(ops, current, recorded);
+    const diff = diffMembers(current, plan.desired, plan.named);
+
+    await lockMemberAuthorities([...diff.toAdd, ...diff.toRemove], tx);
+    await db.groups.lockGroup(link.groupId, tx);
+    // An unlink or delete that committed since the first read leaves nothing to change.
+    const locked = await findLink(ctx, groupId, tx);
+    const before = await db.groups.getAny(link.groupId, tx);
+
+    const applied = plan.touchesMembers
+      ? await applyDiff(tx, ctx, locked, diff, {
+          recorded: await db.scimGroups.listSkippedIds(locked.id, tx),
+          desired: plan.desired,
+        })
+      : { changes: [], membersChanged: false };
+    const changes: GroupChange[] = [...applied.changes];
+    if (plan.displayName !== undefined && plan.displayName !== before.name) {
+      changes.push(
+        await updateGroup(
+          actorOf(ctx),
+          link.groupId,
+          { name: plan.displayName },
+          tx
+        )
+      );
+    }
+    const linkData = {
+      ...(plan.displayName !== undefined &&
+        plan.displayName !== locked.displayName && {
+          displayName: plan.displayName,
+        }),
+      ...(plan.externalId !== undefined &&
+        plan.externalId !== locked.externalId && {
+          externalId: plan.externalId,
+        }),
+    };
+    if (Object.keys(linkData).length > 0) {
+      await db.scimGroups.updateLink(locked.id, linkData, tx);
+    } else if (applied.membersChanged) {
+      await db.scimGroups.touchLink(locked.id, tx);
+    }
+    const group = await db.groups.getAny(link.groupId, tx);
+    return {
+      view: {
+        link: await findLink(ctx, groupId, tx),
+        group,
+        members: await membersOf(group.id, tx),
+      },
+      changes: [mergeChanges(group, changes)],
+    };
+  });
+  for (const change of changes) afterGroupChange(change);
+  return view;
+};
+
+export const replaceScimGroup = async (
+  ctx: ScimContext,
+  groupId: string,
+  input: ScimGroupInput
+): Promise<ScimGroupView> => {
+  assertRequestSize(input.members);
+  return await changeScimGroup(ctx, groupId, [
+    { kind: "replaceMembers", values: input.members },
+    { kind: "displayName", value: input.displayName },
+    { kind: "externalId", value: input.externalId },
+  ]);
+};
+
+export const patchScimGroup = async (
+  ctx: ScimContext,
+  groupId: string,
+  ops: GroupPatchOp[]
+): Promise<ScimGroupView> => await changeScimGroup(ctx, groupId, ops);
+
+/**
+ * Takes the locks a user's leaving the connection needs, in the order the
+ * header of `utils/groups.ts` gives: the user's authority lock, then the row of
+ * every pushed group they are in, ascending. A caller that takes the
+ * last-admin lock takes these first, as a group write does; the user's row
+ * lock comes after the authority lock and may come before the groups. The
+ * connection row is never locked after them. Returns the group ids.
+ */
+export const lockScimGroupsForUser = async (
+  tx: Tx,
+  connectionId: string,
+  userId: string
+): Promise<string[]> => {
+  await db.users.lockAuthority(userId, tx);
+  const ids = (
+    await db.scimGroups.groupIdsForMember(connectionId, userId, tx)
+  ).sort();
+  await db.groups.lockGroups(ids, tx);
+  return ids;
+};
+
+/**
+ * Removes the user from every group linked to the connection, archived ones
+ * too, and deletes their skipped records there. Lock order: the user's
+ * authority lock, the groups, then `assertAdminRemains` inside each removal;
+ * the connection row is not locked. A caller that takes the user's row lock or
+ * the last-admin lock itself first calls `lockScimGroupsForUser` before
+ * either, and runs `afterGroupChange` on the result once the transaction
+ * commits.
+ */
+export const leaveScimGroupsTx = async (
+  tx: Tx,
+  connectionId: string,
+  userId: string
+): Promise<Pick<GroupChange, "affectedUserIds" | "revokedJtis">> => {
+  const groupIds = await lockScimGroupsForUser(tx, connectionId, userId);
+  const actor: GroupActor = {
+    mode: "scim",
+    connectionId,
+    reason: "scim_user_left",
+  };
+  const affected = new Set<string>();
+  const revokedJtis: string[] = [];
+  for (const groupId of groupIds) {
+    // An unlink or group DELETE may have committed between reading the ids and
+    // taking the group locks; the group is then no longer this connection's.
+    const link = await db.scimGroups.getLinkByGroup(groupId, tx);
+    if (link?.connectionId !== connectionId) continue;
+    const change = await removeMembers(actor, groupId, [userId], tx);
+    if (change.removed.length === 0) continue;
+    await db.scimGroups.touchLink(link.id, tx);
+    for (const id of change.affectedUserIds) affected.add(id);
+    revokedJtis.push(...change.revokedJtis);
+  }
+  await db.scimGroups.clearSkippedForUser(connectionId, userId, tx);
+  return { affectedUserIds: [...affected], revokedJtis };
+};

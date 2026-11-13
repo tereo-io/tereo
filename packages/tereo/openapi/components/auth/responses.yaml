@@ -388,6 +388,7 @@ GroupConflictResponse:
               - guest_not_allowed
               - service_account_not_allowed
               - system_user_not_allowed
+              - managed_by_scim
               - conflict
           error_description:
             description: A human-readable explanation of the error
@@ -397,6 +398,8 @@ ScimConflictResponse:
   description: |
     Conflict. `scim_users_exist`: the connection still manages users. `scim_token_limit`: the
     connection already holds two unrevoked tokens. `scim_connection_exists`: a concurrent create won.
+    `scim_groups_exist`: the connection has linked groups (archived ones included) in another
+    scope than the new groups target.
   headers:
     X-RateLimit-Limit:
       $ref: '../headers.yaml#/X-RateLimit-Limit'
@@ -415,6 +418,7 @@ ScimConflictResponse:
               - scim_users_exist
               - scim_token_limit
               - scim_connection_exists
+              - scim_groups_exist
           error_description:
             type: string
       example:

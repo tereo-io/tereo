@@ -9,6 +9,12 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import db from "../../../../../../../../utils/db/index.js";
 import { randomUUID } from "node:crypto";
 import {
+  globalConnection,
+  managedUser,
+  orgConnection,
+  pushedGroup,
+} from "../../../../../../../support/scimGroups.js";
+import {
   adminApi,
   deleteGroups,
   ensureGroupPermission,
@@ -108,5 +114,45 @@ describe("DELETE /v1/admin/groups/:id/members/:userId", () => {
       admin
     );
     expect(res.status).toBe(HTTP_STATUS.BAD_REQUEST);
+  });
+});
+
+describe("DELETE /v1/admin/groups/:id/members/:userId on a SCIM-pushed group", () => {
+  it("returns 409 managed_by_scim and keeps the member", async () => {
+    const c = await orgConnection();
+    const user = await managedUser(c);
+    const { id } = await pushedGroup(c, [user.id]);
+
+    const res = await adminApi(
+      "DELETE",
+      `/groups/${id}/members/${user.id}`,
+      admin
+    );
+    expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+    expect(res.body.error).toBe("managed_by_scim");
+    expect(await prisma.groupMember.count({ where: { groupId: id } })).toBe(1);
+  });
+
+  it("returns 409 managed_by_scim, not 403, on a global group whose member holds more than the caller", async () => {
+    const c = await globalConnection();
+    const role = await roleGranting();
+    const user = await managedUser(c, { inOrg: false });
+    const { id } = await pushedGroup(c, []);
+    await prisma.groupRole.create({
+      data: { groupId: id, roleId: role.id, addedBy: user.id },
+    });
+    await prisma.groupMember.create({
+      data: { groupId: id, userId: user.id, addedBy: user.id },
+    });
+    const weak = await getTestPrincipalToken({ permissions: ["groups.admin"] });
+
+    const res = await adminApi(
+      "DELETE",
+      `/groups/${id}/members/${user.id}`,
+      weak
+    );
+    expect(res.status).toBe(HTTP_STATUS.CONFLICT);
+    expect(res.body.error).toBe("managed_by_scim");
+    expect(await prisma.groupMember.count({ where: { groupId: id } })).toBe(1);
   });
 });

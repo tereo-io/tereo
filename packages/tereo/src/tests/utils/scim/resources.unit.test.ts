@@ -3,6 +3,10 @@
 import { ScimUserObjectSchema } from "../../../utils/scim/mapping.js";
 import { describe, expect, it } from "vitest";
 import {
+  GROUP_SCHEMA,
+  ScimGroupBodySchema,
+} from "../../../utils/scim/groupMapping.js";
+import {
   RESOURCES,
   resourceTypes,
   schemas,
@@ -26,8 +30,35 @@ const userSchema = () => {
 };
 
 describe("resources", () => {
-  it("lists User only", () => {
-    expect(RESOURCES.map((r) => r.id)).toEqual(["User"]);
+  it("lists User and Group", () => {
+    expect(RESOURCES.map((r) => r.id)).toEqual(["User", "Group"]);
+  });
+
+  it("declares exactly the attributes the Group body schema accepts", () => {
+    const group = (
+      schemas() as { Resources: Array<{ id: string; attributes: Attr[] }> }
+    ).Resources.find((r) => r.id === GROUP_SCHEMA);
+    expect(group?.attributes.map((a) => a.name).sort()).toEqual(
+      Object.keys(ScimGroupBodySchema.shape).sort()
+    );
+    expect(
+      group?.attributes
+        .find((a) => a.name === "members")
+        ?.subAttributes?.map((s) => s.name)
+        .sort()
+    ).toEqual(["$ref", "display", "value"]);
+  });
+
+  it("describes the Group resource type", () => {
+    const out = resourceTypes("https://core.test/scim/v2") as {
+      Resources: Array<Record<string, unknown>>;
+    };
+    expect(out.Resources[1]).toMatchObject({
+      id: "Group",
+      name: "Group",
+      endpoint: "/Groups",
+      schema: GROUP_SCHEMA,
+    });
   });
 
   it("declares exactly the attributes the body schema accepts", () => {

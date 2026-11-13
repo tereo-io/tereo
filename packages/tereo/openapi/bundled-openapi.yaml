@@ -889,7 +889,7 @@ tags:
   - name: Admin - Identity Provider Domains
     description: Admin endpoints for the email domains a provider claims — organization, default roles, auto-accept and SSO-only
   - name: Admin - Identity Provider SCIM
-    description: Admin endpoints for a provider's SCIM connection and tokens, and for unlinking a managed user. The `/scim/v2` protocol endpoints are described in `docs/scim.md`
+    description: Admin endpoints for a provider's SCIM connection, its tokens and groups target, and for unlinking a managed user. The `/scim/v2` protocol endpoints are described in `docs/scim.md`
   - name: Admin - Guests
     description: Admin endpoints for guest users — temporary single-organization logins that invite, extend, expire and promote
   - name: Password Setup
@@ -6726,11 +6726,11 @@ paths:
         - Admin - Groups
       summary: List groups
       description: |
-        Returns a page of groups, ordered by id, with each group's member count.
+        Returns a page of groups, ordered by id, with each group's member count, `managedBy` and `skippedMemberCount`.
 
         **Filters:**
         - `organizationId`: an organization's id for its groups, or `global` for groups with none
-        - `definitionSource`: `local` (made through this API) or `provisioned` (declared in provisioning documents)
+        - `definitionSource`: `local` (made through this API), `provisioned` (declared in provisioning documents) or `scim` (pushed by an identity provider)
         - `includeArchived`: `true` to list archived groups too; archived groups are left out by default
         - `q`: case-insensitive match on slug or name
 
@@ -6758,6 +6758,7 @@ paths:
             enum:
               - local
               - provisioned
+              - scim
         - name: includeArchived
           in: query
           required: false
@@ -6869,7 +6870,7 @@ paths:
         - Admin - Groups
       summary: Get group
       description: |
-        Returns the group, archived or not, with its member count.
+        Returns the group, archived or not, with its member count, `managedBy` and `skippedMemberCount`.
 
         **Authorization:** `groups.read`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -6917,7 +6918,9 @@ paths:
       description: |
         Changes the group's slug, name or description (at least one). A provisioned group is
         changed only through its provisioning documents (`409 managed_by_provisioning`), and an
-        archived group must be restored first (`409 resource_archived`).
+        archived group must be restored first (`409 resource_archived`). A group an identity
+        provider pushes over SCIM keeps its `name` in the directory: changing it answers
+        `409 managed_by_scim`, while `slug` and `description` stay here.
 
         **Authorization:** `groups.write`, or, for an organization's group, being an
         `admin` or `owner` of that organization (`organizations.write` also passes, as on
@@ -6966,7 +6969,7 @@ paths:
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
         '409':
           $ref: '#/components/responses/GroupConflictResponse'
-          description: '`group_slug_taken`, `managed_by_provisioning` or `resource_archived`'
+          description: '`group_slug_taken`, `managed_by_provisioning`, `managed_by_scim` (a name change on a pushed group) or `resource_archived`'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7148,7 +7151,8 @@ paths:
       summary: Add group members
       description: |
         Adds up to 500 users; those already members are skipped, and `added` lists the rest.
-        Members of a provisioned group are managed here too.
+        Members of a provisioned group are managed here too. A group an identity provider pushes
+        over SCIM refuses this with `409 managed_by_scim`: its members change in the directory.
 
         For an organization's group, each user must first be a member of that organization: any
         other id, unknown ids included, gets `409 not_org_member`, so ids outside the organization
@@ -7207,7 +7211,7 @@ paths:
           description: Group not found (to a caller holding the route's `groups.*` permission; anyone else gets `403`)
         '409':
           $ref: '#/components/responses/GroupConflictResponse'
-          description: '`not_org_member` (an organization''s group, for any id outside the organization), `guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`, or `resource_archived` (restore the group first)'
+          description: '`not_org_member` (an organization''s group, for any id outside the organization), `guest_not_allowed`, `service_account_not_allowed`, `system_user_not_allowed`, `managed_by_scim` (a pushed group), or `resource_archived` (restore the group first)'
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -7218,7 +7222,8 @@ paths:
         - Admin - Groups
       summary: Remove group member
       description: |
-        Removes one member, from an archived group too. The same checks as taking roles from the
+        Removes one member, from an archived group too. A group an identity provider pushes over
+        SCIM refuses this with `409 managed_by_scim`. The same checks as taking roles from the
         user directly apply, and removing the last live administrator's only way to admin is
         refused (`409`). An organization `admin` (not `owner`) may not remove one of the
         organization's owners.
@@ -7254,7 +7259,96 @@ paths:
           description: Group not found (to a caller holding `groups.write`; anyone else gets `403`), or the user is not a member
         '409':
           $ref: '#/components/responses/ConflictResponse'
-          description: The last administrator would lose admin
+          description: The last administrator would lose admin, or `managed_by_scim` (a pushed group)
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/groups/{id}/scim:
+    delete:
+      tags:
+        - Admin - Groups
+      summary: Unlink a group from SCIM
+      description: |
+        Hands a pushed group back to local management: both sources become `local`, and its
+        members, roles and archive state stay. The directory cannot adopt a group, so its next
+        push creates a new group. The group's recorded skipped members are deleted. 404 when the
+        group is not pushed by SCIM.
+
+        **Authorization:** `groups.write`, or, for an organization's group, being an `admin` or
+        `owner` of that organization (`organizations.write` also passes, as on the organization
+        routes). A global group needs `groups.write`.
+
+        An audit log entry is created for this action (`metadata.action` `scim_unlinked`).
+        An `auth.group.updated` webhook event is emitted.
+      operationId: deleteAdminGroupScim
+      security:
+        - BearerAuth:
+            - groups.write
+      parameters:
+        - $ref: '#/components/parameters/GroupIdParam'
+      responses:
+        '204':
+          $ref: '#/components/responses/NoContentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: No authority over the group (to a caller without `groups.write`, the same `403` as for a missing group)
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: Group not found, or not pushed by SCIM
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/groups/{id}/scim/skipped-members:
+    get:
+      tags:
+        - Admin - Groups
+      summary: List a pushed group's skipped members
+      description: |
+        Returns the users the directory put in the group whom core could not add, ordered by the
+        record's id and cursor-paginated (`limit` 1-100, default 50). The only reason today is
+        `not_org_member`: the user is not a member of the group's organization. Core never adds
+        them by itself when they join the organization; they are retried on the next request that
+        changes the group's members, and a record the directory removes is deleted. 404 when the
+        group is not pushed by SCIM.
+
+        **Authorization:** `groups.read`, or, for an organization's group, being an `admin` or
+        `owner` of that organization (`organizations.write` also passes).
+      operationId: getAdminGroupScimSkippedMembers
+      security:
+        - BearerAuth:
+            - groups.read
+      parameters:
+        - $ref: '#/components/parameters/GroupIdParam'
+        - name: cursor
+          in: query
+          required: false
+          description: The `nextCursor` of the previous page (opaque)
+          schema:
+            type: string
+        - $ref: '#/components/parameters/GroupsLimitParam'
+      responses:
+        '200':
+          description: A page of skipped members
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListScimSkippedMembersResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: No authority over the group (to a caller without `groups.read`, the same `403` as for a missing group)
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+          description: Group not found, or not pushed by SCIM
         '429':
           $ref: '#/components/responses/RateLimitResponse'
         '500':
@@ -9363,7 +9457,8 @@ paths:
       summary: Get an identity provider's SCIM connection
       description: |
         Returns the provider's SCIM connection with its tokens (never their values) and
-        the number of users it manages. 404 when the provider has no connection.
+        the number of users and groups it manages, and where its pushed groups go
+        (`groupsTarget`). 404 when the provider has no connection.
 
         The SCIM protocol endpoints under `baseUrl` are described in `docs/scim.md`.
       operationId: getAdminScimConnection
@@ -9397,12 +9492,20 @@ paths:
       summary: Create a SCIM connection or switch it on or off
       description: |
         Creates the provider's SCIM connection (201), or sets `isActive` on the existing one
-        (200). While the connection or the provider is inactive, every SCIM call answers 401.
+        (200); `isActive` is required on create and optional on update, where leaving it out
+        keeps the current state. While the connection or the provider is inactive, every SCIM call answers 401.
 
         Creating a connection and setting `isActive: true` need a caller holding `admin`
         through a global role, as `ssoOnly` does (403 otherwise): enabling SCIM lets the
         provider sign in as any user it adopts in its domains. Switching a connection off
         does not.
+
+        `groupsTarget` (optional, also accepted on create) sets where pushed groups are
+        created: `none` (the default; every `/scim/v2/Groups` call answers 403), `global`, or
+        one live organization. Changing it, to `none` included, needs a global `admin` too; a `PUT` repeating the current target needs none.
+        While the connection has linked groups (archived ones included), the target may only
+        be `none` or the scope those groups are in; anything else is `409 scim_groups_exist`.
+        `none` freezes the linked groups until the target is set back to their scope.
 
         An audit log entry is created for a change (`ScimConnection`). No webhook event is emitted.
       operationId: putAdminScimConnection
@@ -9452,7 +9555,8 @@ paths:
         Removes the connection and its tokens. Refused with 409 `scim_users_exist` while it
         manages any user, a deleted SCIM resource included: unlink them first with
         `DELETE /v1/admin/users/{id}/scim`. The exclusions of users unlinked from it are
-        deleted with it.
+        deleted with it. Its pushed groups become local groups (members, roles and archive
+        state kept), each with an `auth.group.updated` event.
 
         An audit log entry is created for this action.
       operationId: deleteAdminScimConnection
@@ -9568,7 +9672,9 @@ paths:
         provider's sign-in no longer claims them, and the IdP cannot adopt them again
         until an admin calls `PUT /v1/admin/users/{id}/scim/release`. The admin user
         response then shows `scimExcluded`. 404 when the user is not managed by SCIM or
-        is already unlinked.
+        is already unlinked. The user also leaves every group the connection pushed, archived
+        ones included, with the usual `members_removed` audit entry and `auth.group.members-removed`
+        event for each.
 
         An audit log entry is created for this action (`metadata.action` `scim_unlinked`).
       operationId: unlinkAdminUserScim
@@ -24159,6 +24265,7 @@ components:
                   - guest_not_allowed
                   - service_account_not_allowed
                   - system_user_not_allowed
+                  - managed_by_scim
                   - conflict
               error_description:
                 description: A human-readable explanation of the error
@@ -24988,6 +25095,8 @@ components:
       description: |
         Conflict. `scim_users_exist`: the connection still manages users. `scim_token_limit`: the
         connection already holds two unrevoked tokens. `scim_connection_exists`: a concurrent create won.
+        `scim_groups_exist`: the connection has linked groups (archived ones included) in another
+        scope than the new groups target.
       headers:
         X-RateLimit-Limit:
           $ref: '#/components/headers/X-RateLimit-Limit'
@@ -25006,6 +25115,7 @@ components:
                   - scim_users_exist
                   - scim_token_limit
                   - scim_connection_exists
+                  - scim_groups_exist
               error_description:
                 type: string
           example:
@@ -27394,6 +27504,8 @@ components:
         - createdAt
         - updatedAt
         - memberCount
+        - managedBy
+        - skippedMemberCount
       properties:
         id:
           type: string
@@ -27421,12 +27533,14 @@ components:
           enum:
             - local
             - provisioned
-          description: '`provisioned` groups are declared in provisioning documents: their slug, name, description, roles and archive state change only there'
+            - scim
+          description: '`provisioned` groups are declared in provisioning documents: their slug, name, description, roles and archive state change only there. `scim` groups are pushed by an identity provider: the directory owns their name, members and existence (`managedBy` names the provider)'
         membershipSource:
           type: string
           enum:
             - local
-          description: Members are always managed through this API
+            - scim
+          description: '`scim`: the identity provider decides who is a member, so adding and removing members and renaming answer `409 managed_by_scim`'
         unprovisionedAt:
           type:
             - string
@@ -27448,6 +27562,29 @@ components:
         memberCount:
           type: integer
           minimum: 0
+        managedBy:
+          description: The identity provider whose SCIM connection pushes this group; null for any other group
+          oneOf:
+            - type: object
+              required:
+                - kind
+                - providerId
+                - providerName
+              properties:
+                kind:
+                  type: string
+                  enum:
+                    - scim
+                providerId:
+                  type: string
+                  format: uuid
+                providerName:
+                  type: string
+            - type: 'null'
+        skippedMemberCount:
+          type: integer
+          minimum: 0
+          description: Members the directory named whom core could not add because they are not members of the group's organization (`GET /v1/admin/groups/{id}/scim/skipped-members`); 0 for a group that is not pushed
     ListGroupsResponse:
       type: object
       description: Cursor-paginated list of groups
@@ -27705,10 +27842,12 @@ components:
           enum:
             - local
             - provisioned
+            - scim
         membershipSource:
           type: string
           enum:
             - local
+            - scim
         unprovisionedAt:
           type:
             - string
@@ -33736,6 +33875,54 @@ components:
           type: string
           minLength: 12
           maxLength: 256
+    ScimSkippedMember:
+      type: object
+      description: A user the directory put in a pushed group whom core could not add.
+      required:
+        - userId
+        - email
+        - name
+        - reason
+        - skippedAt
+      properties:
+        userId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type:
+            - string
+            - 'null'
+        reason:
+          type: string
+          enum:
+            - not_org_member
+          description: The user is not a member of the group's organization.
+        skippedAt:
+          type: string
+          format: date-time
+    ListScimSkippedMembersResponse:
+      type: object
+      required:
+        - data
+        - hasMore
+        - limit
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScimSkippedMember'
+        hasMore:
+          type: boolean
+        limit:
+          type: integer
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: Opaque; pass it back as `cursor`. Null on the last page.
     IdentityProvider:
       type: object
       description: An upstream identity provider. The client secret is write-only and never returned.
@@ -33881,6 +34068,43 @@ components:
             maxLength: 100
         countsAsMfa:
           type: boolean
+    ScimGroupsTarget:
+      description: Where the connection's pushed groups are created. Changing it needs `admin` through a global role.
+      oneOf:
+        - type: object
+          required:
+            - kind
+          additionalProperties: false
+          properties:
+            kind:
+              type: string
+              enum:
+                - none
+        - type: object
+          required:
+            - kind
+          additionalProperties: false
+          properties:
+            kind:
+              type: string
+              enum:
+                - global
+        - type: object
+          required:
+            - kind
+            - organizationId
+          additionalProperties: false
+          properties:
+            kind:
+              type: string
+              enum:
+                - organization
+            organizationId:
+              type: string
+              format: uuid
+              description: A live organization (`400 unknown_organization` otherwise)
+      discriminator:
+        propertyName: kind
     ScimToken:
       type: object
       description: A SCIM token as listed. The value is never returned after minting.
@@ -33916,6 +34140,8 @@ components:
         - isActive
         - lastUsedAt
         - managedUserCount
+        - groupsTarget
+        - managedGroupCount
         - tokens
       properties:
         id:
@@ -33938,18 +34164,28 @@ components:
         managedUserCount:
           type: integer
           description: Users the connection manages, deleted SCIM resources included and users an admin unlinked left out.
+        groupsTarget:
+          $ref: '#/components/schemas/ScimGroupsTarget'
+        managedGroupCount:
+          type: integer
+          minimum: 0
+          description: Groups linked to the connection, archived ones included.
         tokens:
           type: array
           items:
             $ref: '#/components/schemas/ScimToken'
     PutScimConnectionRequest:
       type: object
-      description: Unknown properties are ignored.
-      required:
-        - isActive
+      description: |
+        Unknown properties are rejected (400). `isActive` is required to create the
+        connection (400 without it); on an existing connection, leaving it out keeps the
+        current state.
+      additionalProperties: false
       properties:
         isActive:
           type: boolean
+        groupsTarget:
+          $ref: '#/components/schemas/ScimGroupsTarget'
     CreatedScimToken:
       type: object
       required:

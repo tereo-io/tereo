@@ -7,7 +7,8 @@
  *   `unknown_user`;
  * - 409: `not_org_member`, `guest_not_allowed`, `service_account_not_allowed`,
  *   `system_user_not_allowed`, `group_slug_taken`, `managed_by_provisioning`,
- *   `resource_archived` (the group is archived), `already_archived`,
+ *   `managed_by_scim` (a group the identity provider's SCIM connection pushes:
+ *   its name and members change there), `resource_archived` (the group is archived), `already_archived`,
  *   `not_archived`, and `conflict` (the change would leave no active
  *   administrator).
  */
@@ -19,9 +20,13 @@ export interface Group {
   slug: string;
   name: string;
   description: string | null;
-  /** `provisioned` groups change only through provisioning documents. */
-  definitionSource: "local" | "provisioned";
-  membershipSource: "local";
+  /**
+   * `provisioned` groups change only through provisioning documents; `scim`
+   * groups are pushed by an identity provider.
+   */
+  definitionSource: "local" | "provisioned" | "scim";
+  /** `scim`: the identity provider decides who is a member. */
+  membershipSource: "local" | "scim";
   /** ISO-8601; when provisioning found a provisioned group missing. */
   unprovisionedAt: string | null;
   /** ISO-8601; null for a live group. */
@@ -29,12 +34,20 @@ export interface Group {
   createdAt: string;
   updatedAt: string;
   memberCount: number;
+  /** The identity provider that pushes this group; null for any other. */
+  managedBy: {
+    kind: "scim";
+    providerId: string;
+    providerName: string;
+  } | null;
+  /** Members the directory named whom core could not add; 0 unless pushed. */
+  skippedMemberCount: number;
 }
 
 export interface ListGroupsQuery {
   /** `global` for global groups only, or an organization id. */
   organizationId?: string;
-  definitionSource?: "local" | "provisioned";
+  definitionSource?: "local" | "provisioned" | "scim";
   /** Include archived groups; by default they are left out. */
   includeArchived?: boolean;
   q?: string;

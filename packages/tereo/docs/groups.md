@@ -17,8 +17,8 @@ Tables in the `auth` schema: `groups`, `group_members`, `group_roles`.
 | `organizationId` | Null = a **global** group; otherwise an **organization** group. Fixed once created. The organization must exist and not be archived (400 `unknown_organization`) |
 | `slug` | `[a-z0-9-]`, 1-100. Unique within its scope (globally, or within the organization). An archived group keeps its slug, so a new group cannot reuse it (409 `group_slug_taken`) |
 | `name`, `description` | max 255, max 500 (nullable) |
-| `definitionSource` | `local` (made by an admin) or `provisioned` (made by a provisioning document) |
-| `membershipSource` | `local` today; reserved for SCIM ([below](#scim-later)) |
+| `definitionSource` | `local` (made by an admin), `provisioned` (made by a provisioning document) or `scim` (pushed by an identity provider, [below](#scim)) |
+| `membershipSource` | `local` (managed through the admin API) or `scim` (the identity provider decides who is in the group) |
 | `unprovisionedAt` | Set while a provisioned group is missing from the documents |
 | `archivedAt` | Groups are archived and restored, never deleted |
 
@@ -34,6 +34,8 @@ Members are users; `group_members` records who added them. Roles are held throug
   same transaction, with an audit entry.
 - A deactivated user keeps their memberships; they grant nothing, as direct roles do not.
 - Adding members to an **archived** group is refused (409 `resource_archived`); restore it first.
+- In a group pushed over SCIM only a user the connection manages can be a member, and the directory,
+  not the admin API, adds and removes them ([SCIM](#scim)).
 
 ### Which roles a group may hold
 
@@ -133,14 +135,16 @@ All under `/v1/admin`. Lists are cursor-paginated (`limit` 1-100, default 50; `n
 
 | Route | Purpose |
 |---|---|
-| `GET /groups` | List. Filters: `organizationId` (a UUID or `global`), `definitionSource`, `includeArchived` (archived groups are left out unless `true`), `q` |
+| `GET /groups` | List. Filters: `organizationId` (a UUID or `global`), `definitionSource` (`local`, `provisioned` or `scim`), `includeArchived` (archived groups are left out unless `true`), `q`. Every group response, this list and `GET /users/:id/groups` included, carries `managedBy` and `skippedMemberCount` ([SCIM](#scim)) |
 | `POST /groups` | Create. Body: `slug`, `name`, `description?`, `organizationId?`, `roleIds?` (max 100). 201 |
 | `GET /groups/:id` | Read, with `memberCount` |
-| `PATCH /groups/:id` | Edit `slug`, `name`, `description`. Not on an archived group |
+| `PATCH /groups/:id` | Edit `slug`, `name`, `description`. Not on an archived group; `name` not on a pushed group (repeating its current `name` is accepted and changes nothing) |
 | `POST /groups/:id/archive`, `POST /groups/:id/restore` | Archive keeps members and roles |
 | `GET /groups/:id/members` | `{ data: [{ userId, email, name, isActive, addedAt }], hasMore, nextCursor }` |
-| `POST /groups/:id/members` | `{ userIds }` (1-500). Returns `{ added }`: users already in the group are skipped |
-| `DELETE /groups/:id/members/:userId` | Remove. 204; 404 if not a member |
+| `POST /groups/:id/members` | `{ userIds }` (1-500). Returns `{ added }`: users already in the group are skipped. `409 managed_by_scim` on a pushed group |
+| `DELETE /groups/:id/members/:userId` | Remove. 204; 404 if not a member. `409 managed_by_scim` on a pushed group |
+| `GET /groups/:id/scim/skipped-members` | `{ data: [{ userId, email, name, reason, skippedAt }], limit, hasMore, nextCursor }` for a pushed group; readable by whoever may read the group (`nextCursor` is opaque). 404 when the group is not pushed |
+| `DELETE /groups/:id/scim` | Unlink a pushed group: it becomes local, keeping members, roles and archive state. 204; 404 when not pushed. Needs what editing the group needs |
 | `GET /groups/:id/roles` | The group's roles |
 | `PUT /groups/:id/roles` | `{ roleIds }` replaces the set (max 100). Returns `{ roles, added, removed }` |
 | `GET /roles/:id/users` | `{ roleId, users, groups }`: `users` are the role's **direct** holders (each `via: { kind: "direct" }`); `groups` are the unarchived groups holding it, each with `organization` and `memberCount` (list their members through `GET /groups/:id/members`) |
@@ -154,9 +158,12 @@ inactive organization's groups is under [Authorization](#authorization).
 A **provisioned** group answers `409 managed_by_provisioning` to `PATCH`, role changes, archive and
 restore. Its members stay editable (`membershipSource` is `local`).
 
+A group **pushed over SCIM** answers `409 managed_by_scim` to a rename and to adding or removing
+members. Its slug, description, roles, archive, restore and unlink stay with admins.
+
 Errors (`code`): `unknown_organization`, `unknown_role`, `unknown_user`, `role_not_org_assignable`,
 `group_slug_taken` (409), `not_org_member`, `guest_not_allowed`, `service_account_not_allowed`,
-`system_user_not_allowed` (409), `managed_by_provisioning` (409), `already_archived` and
+`system_user_not_allowed` (409), `managed_by_provisioning` (409), `managed_by_scim` (409), `already_archived` and
 `not_archived` (409, archiving an archived group or restoring one that is not), and a conflict when
 archiving or changing roles would leave no administrator. Archived groups answer 409
 `resource_archived` to edits, role changes (also when archived while the request waited for the
@@ -192,7 +199,7 @@ organization's ([webhooks](webhooks.md)).
 
 | Event | `data` |
 |---|---|
-| `auth.group.created`, `updated`, `archived`, `restored` | `id`, `slug`, `name`, `organizationId`, `definitionSource`, `membershipSource`, `unprovisionedAt` |
+| `auth.group.created`, `updated`, `archived`, `restored` | `id`, `slug`, `name`, `organizationId`, `definitionSource`, `membershipSource` (`local` or `scim`; `definitionSource` can also be `provisioned`), `unprovisionedAt` |
 | `auth.group.members-added`, `members-removed` | `groupId`, `organizationId`, `userIds`; one event per operation, in chunks of 1,000 ids |
 | `auth.group.roles-changed` | `groupId`, `organizationId`, `roleIds`, `added`, `removed` |
 
@@ -232,9 +239,30 @@ notifications as an admin change; the deploy is the authority, so the caller-gra
 apply. A group dropped from the documents is marked (`unprovisionedAt`), archived after
 `REGISTRY_RETIREMENT_GRACE_HOURS` with its members kept, and restored if it returns.
 
-## SCIM (later)
+## SCIM
 
-The SCIM connection now exists for **Users** ([scim.md](scim.md)); SCIM Groups (Okta, Entra) are still to come and are meant to slot in without reshaping this: add `scim` to the
-two source enums, a `scim_group_links (connection_id, external_id, group_id)` table, and a `scim` mode
-beside `admin` and `provisioning` in `utils/groups.ts`. A linked group's members become read-only in
-the admin API (`409 managed_by_scim`); unlinking returns membership to `local`, keeping the members.
+An identity provider's SCIM connection can push groups and their members ([scim.md](scim.md#groups)).
+A pushed group is an ordinary group with `definitionSource` and `membershipSource` both `scim`, created
+in the scope the connection's groups target names (global or one organization) with no roles.
+
+| | Directory | Admin API |
+|---|---|---|
+| Name, members | Yes | `409 managed_by_scim` |
+| Roles, slug, description, archive, restore, unlink | No | Yes |
+
+The directory's `DELETE /Groups/{id}` is how a pushed group's existence ends (it archives and unlinks it).
+
+- A group response carries `managedBy` (`{ kind: "scim", providerId, providerName }`, else `null`) and
+  `skippedMemberCount`, the managed users the directory named who are not members of the group's
+  organization (listed by `GET /groups/:id/scim/skipped-members`).
+- Only a user the connection manages can be a member. A guest, service account or the system user is
+  left out of a pushed group, not an error.
+- Membership changes run in `utils/groups.ts` in a `scim` mode beside `admin` and `provisioning`: it
+  acts as the system user and skips the caller-grant checks, since the directory is the authority once
+  an admin has attached roles. The member rules, the last-admin guard, two-factor token revocation,
+  audit and events all hold.
+- A user leaves all the connection's pushed groups, archived ones included, when the directory deletes
+  them or an admin unlinks them from SCIM; deactivation keeps memberships.
+- Unlinking a group (or deleting the connection, or `DELETE /Groups/{id}` in SCIM, which also
+  archives it) sets both sources to `local` and keeps members and roles. A later push of the same group
+  makes a new one.

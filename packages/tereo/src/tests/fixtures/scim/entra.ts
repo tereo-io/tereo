@@ -41,3 +41,48 @@ export const entraAttributePatch = {
     { op: "Add", path: "externalId", value: "new-external-id" },
   ],
 };
+
+const GROUP = "urn:ietf:params:scim:schemas:core:2.0:Group";
+
+// The Group shapes below are our best understanding of Entra's provisioning
+// requests, not copied from a captured request. To be confirmed in the manual
+// tenant run.
+export const entraCreateGroup = {
+  schemas: [GROUP],
+  externalId: "9c2d4f6b-3e5a-4b7c-8d9e-1f2a3b4c5d6e",
+  displayName: "Platform Engineering",
+  members: [
+    { value: "0198f2a4-0000-7000-8000-000000000001" },
+    { value: "0198f2a4-0000-7000-8000-000000000002" },
+  ],
+};
+
+export const entraAddMembersPatch = {
+  schemas: [PATCH_OP],
+  Operations: [
+    {
+      op: "Add",
+      path: "members",
+      value: [{ value: "0198f2a4-0000-7000-8000-000000000003" }],
+    },
+  ],
+};
+
+export const entraRemoveMembersPatch = {
+  schemas: [PATCH_OP],
+  Operations: [
+    {
+      op: "Remove",
+      path: "members",
+      value: [
+        { value: "0198f2a4-0000-7000-8000-000000000001" },
+        { value: "0198f2a4-0000-7000-8000-000000000002" },
+      ],
+    },
+  ],
+};
+
+export const entraRenameGroupPatch = {
+  schemas: [PATCH_OP],
+  Operations: [{ op: "Replace", path: "displayName", value: "Platform Eng" }],
+};

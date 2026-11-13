@@ -36,3 +36,45 @@ export const oktaAttributePatch = {
     },
   ],
 };
+
+const GROUP = "urn:ietf:params:scim:schemas:core:2.0:Group";
+
+// The Group shapes below are our best understanding of Okta's group push, not
+// copied from a captured request. To be confirmed in the manual tenant run.
+export const oktaCreateGroup = {
+  schemas: [GROUP],
+  displayName: "Platform Engineering",
+  externalId: "00g1abcd2EFGH3ijk4l5",
+  members: [
+    { value: "0198f2a4-0000-7000-8000-000000000001", display: "Jane Doe" },
+    { value: "0198f2a4-0000-7000-8000-000000000002", display: "John Roe" },
+  ],
+};
+
+export const oktaAddMembersPatch = {
+  schemas: [PATCH_OP],
+  Operations: [
+    {
+      op: "add",
+      path: "members",
+      value: [
+        { value: "0198f2a4-0000-7000-8000-000000000003", display: "Ann Lee" },
+      ],
+    },
+  ],
+};
+
+export const oktaRemoveMemberPatch = {
+  schemas: [PATCH_OP],
+  Operations: [
+    {
+      op: "remove",
+      path: 'members[value eq "0198f2a4-0000-7000-8000-000000000002"]',
+    },
+  ],
+};
+
+export const oktaRenameGroupPatch = {
+  schemas: [PATCH_OP],
+  Operations: [{ op: "replace", value: { displayName: "Platform Eng" } }],
+};

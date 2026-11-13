@@ -3,6 +3,7 @@ import { uniqueViolationFields } from "../prismaErrors.js";
 import { prisma } from "./prisma.js";
 import {
   GroupDefinitionSource,
+  GroupMembershipSource,
   Prisma,
 } from "../../../prisma/generated/client/index.js";
 
@@ -103,8 +104,19 @@ export const list = async (
   return { data: hasMore ? rows.slice(0, opts.limit) : rows, hasMore };
 };
 
-export const create = (data: CreateGroupInput, tx?: Prisma.TransactionClient) =>
-  mapSlugConflict(() => (tx ?? prisma).group.create({ data }));
+export const create = (
+  data: CreateGroupInput & { membershipSource?: "local" | "scim" },
+  tx?: Prisma.TransactionClient
+) => mapSlugConflict(() => (tx ?? prisma).group.create({ data }));
+
+export const setSources = (
+  groupId: string,
+  sources: {
+    definitionSource: GroupDefinitionSource;
+    membershipSource: GroupMembershipSource;
+  },
+  tx: Prisma.TransactionClient
+) => tx.group.update({ where: { id: groupId }, data: sources });
 
 export const update = (
   id: string,
@@ -122,6 +134,23 @@ export const setArchived = (
 /** Serializes writers to one group's members and roles until `tx` ends. */
 export const lockGroup = async (id: string, tx: Prisma.TransactionClient) => {
   await tx.$queryRaw`SELECT 1 FROM "auth"."groups" WHERE id = ${id}::uuid FOR UPDATE`;
+};
+
+/**
+ * The slugs in one scope (an organization, or none for global) that start
+ * with `prefix`, archived groups included: they keep their slug. The prefix
+ * is always `[a-z0-9-]`, so it carries no wildcard.
+ */
+export const slugsStartingWith = async (
+  organizationId: string | null,
+  prefix: string,
+  tx: Prisma.TransactionClient
+): Promise<Set<string>> => {
+  const rows = await tx.group.findMany({
+    where: { organizationId, slug: { startsWith: prefix } },
+    select: { slug: true },
+  });
+  return new Set(rows.map((r) => r.slug));
 };
 
 /** Locks several groups' rows, ascending id: the order every such caller takes. */
