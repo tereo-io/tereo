@@ -181,7 +181,7 @@ A service's own document usually holds only `version` and `service`.
 | `internalHost` | Optional, max 253: the one host its own webhooks may reach at a private address ([below](#internal-webhook-targets)) |
 | `secretFrom` | Required: an environment variable's name ([Secrets](#secrets)) |
 | `rateLimitPerSecond` | Optional integer 1 to 100000: the service account's requests per second, in place of its tier's default. Omitted means no override, so dropping it from the document clears it at the next apply. Audited, with `auth.user.rate-limit-changed`, only when it changes |
-| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`, `group_resolver`, `guest_inviter`), or `<slug>/<name>`, a system role another service of the set declares |
+| `access.roles` | Requestable core roles, bare (`file_user`, `webhook_publisher`, `audit_writer`, `audit_reader`, `notification_sender`, `tenant_resolver`, `user_resolver`, `group_resolver`, `guest_inviter`; what each grants, including the resolver roles' reach across every organization, is in [registry](registry.md#access)), or `<slug>/<name>`, a system role another service of the set declares |
 | `access.audiences` | Services of the set whose APIs this one may call (it can be introspected by them). Not core, not itself |
 | `permissions`, `systemRoles`, `buckets`, `eventTypes` | The service's declaration, with the namespacing, validation and update rules of [registry](registry.md#what-a-declaration-holds) |
 | `webhooks` | Service-owned endpoints: [Webhooks](#webhooks) |

@@ -150,7 +150,7 @@ Core's own roles are requestable by their bare name only; any other core role (`
 | `guest_inviter` | `users.guests.read`, `users.guests.write` — invite and manage guests |
 | `tenant_resolver` | `organizations.read` — read any organization |
 | `user_resolver` | `users.read` — read any user, and the groups a user belongs to |
-| `group_resolver` | `groups.read` — read any group, global or an organization's, with its members and roles; tells a missing group (`404`) from one that exists, which a service without it cannot (`403` for both) |
+| `group_resolver` | `groups.read` — read-only, and global like the other resolver roles: in every organization and among global groups, list and search groups (archived ones too) and read each one, its roles, its members with their names, emails and active flag, and its SCIM skipped members (names, emails); the service's provisioned webhooks receive `auth.group.*` events (group fields, member user ids, role ids). It tells a missing group (`404`) from one that exists, which a service without it cannot (`403` for both) |
 
 Core's roles change only with core's code, so a granted core role gives whatever core's current
 version gives it.

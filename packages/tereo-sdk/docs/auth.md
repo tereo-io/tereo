@@ -89,7 +89,10 @@ Introspection uses `POST /oauth/introspect` over `CORE_PUBLIC_CLIENT` (the servi
 Basic auth); users, organizations and groups use `/v1/admin/users/:id`, `/v1/admin/organizations/:id`
 and `/v1/admin/groups/:id` over `CORE_CLIENT`, so the service needs access to read them: the
 requestable core roles `user_resolver` (users, and a user's groups), `tenant_resolver`
-(organizations) and `group_resolver` (groups) in its provisioning document's `access.roles`. A
+(organizations) and `group_resolver` (groups) in its provisioning document's `access.roles`. Each
+reads across every organization, read-only: `group_resolver` reaches every group's members with
+their names and emails, not only the group `getGroup` asks for
+([registry](../../tereo/docs/registry.md#access)). A
 refusal, or any failure but the 404 that becomes `null`, rejects with a `RequestError` whose
 `httpStatus` is core's answer (undefined when core could not be reached).
 
