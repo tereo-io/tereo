@@ -1,3 +1,19 @@
+## 0.5.2 (2026-11-13)
+
+### 🚀 Features
+
+- `CoreClient` carries `url`: core's base URL as the client reaches it (the `url` option, else `CORE_URL`), without a trailing slash. ([#59](https://github.com/tereo-io/tereo/pull/59))
+- `core.auth.listUserGroups(userId, { includeArchived })` returns a user's groups and `core.auth.getGroup(id)` a group, each `null` when core answers 404 and otherwise rejecting with the `RequestError` (`httpStatus` set to core's answer). Neither is cached. In `testMode`, `listUserGroups` returns no groups and `getGroup` a stub for any id. ([#59](https://github.com/tereo-io/tereo/pull/59))
+
+### 🩹 Fixes
+
+- The SDK's cache commands (introspection, user, organization and file metadata caches) give up after one second and fall through to core, as on a Redis error. With the `maxRetriesPerRequest: null` the SDK asks for, ioredis holds a command while it reconnects until Redis is back, so during an outage a cache read held the request that made it. A Redis that answers within a second behaves as before. The README describes what else waits on Redis during an outage. ([#59](https://github.com/tereo-io/tereo/pull/59))
+- The docs say how `req.auth` is typed in a project that imports `@modelcontextprotocol/express` itself, which declares `req.auth` as its own `AuthInfo`: read the context with `core.auth.validateUser(req)`, typed `AuthContext`, rather than casting. `@tereo-io/mcp` does not load that declaration and exports its own host and origin validation, so an app using it needs no such import. ([#59](https://github.com/tereo-io/tereo/pull/59))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.5.1 (2026-11-13)
 
 ### 🚀 Features
