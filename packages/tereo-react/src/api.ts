@@ -45,6 +45,13 @@ const attachAuth = (instance: AxiosInstance): void => {
       }
 
       original._retry = true;
+      // Another tab (or a concurrent request) renewed the token after this
+      // request was sent: retry with that one rather than renew again.
+      const stored = readTokens()?.access_token;
+      if (stored && original.headers.Authorization !== `Bearer ${stored}`) {
+        bearer(original, stored);
+        return instance(original);
+      }
       const tokens = await refreshTokens();
       bearer(original, tokens.access_token);
       return instance(original);

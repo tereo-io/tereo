@@ -132,6 +132,26 @@ describe("createApiClients", () => {
     expect(sent).toEqual(["Bearer tok", "Bearer new"]);
   });
 
+  it("retries a 401 with a token renewed meanwhile, without renewing again", async () => {
+    storeToken("tok", 900_000);
+    markSignedIn();
+    renewedTo("new");
+    const { client, sent } = respond(401, 200);
+    const adapter = client.defaults.adapter as AxiosAdapter;
+    client.defaults.adapter = async (cfg) => {
+      // Another tab renews while this request is in flight.
+      const res = adapter(cfg);
+      storeToken("other-tab", 900_000);
+      return res;
+    };
+
+    const res = await client.get("/x");
+
+    expect(res.status).toBe(200);
+    expect(refreshTokens).not.toHaveBeenCalled();
+    expect(sent).toEqual(["Bearer tok", "Bearer other-tab"]);
+  });
+
   it("rejects when the retry is a 401 too, without renewing again", async () => {
     storeToken("tok", 900_000);
     markSignedIn();
