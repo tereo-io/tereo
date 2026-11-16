@@ -42,6 +42,7 @@ export interface ClientRecord {
   audience: string[];
   consentRequired: boolean;
   trustedCoreScopes: string[];
+  liveEvents: boolean;
   provisioned: boolean;
   unprovisionedAt: Date | null;
   ownerId: string;
@@ -202,6 +203,7 @@ export const create = async (
       ownerId: data.ownerId,
       provisioned: data.provisioned,
       trustedCoreScopes: data.trustedCoreScopes,
+      liveEvents: data.liveEvents,
     },
     include: { serviceAccountUser: true },
   });
@@ -225,6 +227,7 @@ export const update = async (
       grantTypes: data.grantTypes,
       consentRequired: data.consentRequired,
       audience: data.audience,
+      liveEvents: data.liveEvents,
       ...(data.ownerId && { ownerId: data.ownerId }),
     },
     include: { serviceAccountUser: true },

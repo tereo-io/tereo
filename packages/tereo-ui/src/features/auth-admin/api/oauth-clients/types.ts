@@ -22,6 +22,8 @@ export interface OAuthClient {
   trustedCoreScopes: string[];
   /** Whether users approve the app after signing in; core's own login client never asks. */
   consentRequired: boolean;
+  /** Whether users signed in through this client can receive live updates over core's socket. */
+  liveEvents: boolean;
   provisioned: boolean;
   /** When it went missing from the provisioning documents; null while they list it. */
   unprovisionedAt: string | null;
@@ -50,6 +52,7 @@ export interface CreateClientInput {
   grantTypes: GrantType[];
   audience?: string[];
   consentRequired?: boolean;
+  liveEvents?: boolean;
 }
 
 export interface UpdateClientInput {
@@ -61,6 +64,7 @@ export interface UpdateClientInput {
   grantTypes?: GrantType[];
   audience?: string[];
   consentRequired?: boolean;
+  liveEvents?: boolean;
   ownerId?: string;
 }
 

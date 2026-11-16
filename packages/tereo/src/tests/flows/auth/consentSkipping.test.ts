@@ -297,6 +297,7 @@ describe("trusted core scopes", () => {
               audience: [],
               consentRequired: false,
               trustedCoreScopes: ["core:files.read"],
+              liveEvents: false,
             },
           ],
         },

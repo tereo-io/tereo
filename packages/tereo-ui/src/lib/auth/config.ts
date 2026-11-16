@@ -1,131 +1,74 @@
-export interface AuthConfigOptions {
-  AUTH_SERVER_URL: string;
-  REDIRECT_URI: string;
-  CLIENT_ID: string;
-  /**
-   * Path the app is served under, without a trailing slash ("" at the root).
-   * Stripped from the location before matching public routes.
-   * @default ""
-   */
-  basePath?: string;
-  /**
-   * Path to redirect to after logout or unauthorized access.
-   * WARNING: This MUST be a publicly accessible route (not protected by auth)
-   * to avoid infinite redirect loops.
-   * @default "/"
-   */
-  logoutRedirectPath?: string;
-  /**
-   * Path to redirect to for unauthorized users (when no token exists).
-   * WARNING: This MUST be a publicly accessible route (not protected by auth)
-   * to avoid infinite redirect loops.
-   * @default "/"
-   */
-  unauthorizedRedirectPath?: string;
-  /**
-   * Buffer time in milliseconds before token expiration to trigger refresh.
-   * Lower values reduce unnecessary refreshes but increase risk of using expired tokens.
-   * @default 30000 (30 seconds)
-   */
-  tokenExpirationBuffer?: number;
-  /**
-   * WebSocket path for real-time updates.
-   * @default "/ws"
-   */
-  wsPath?: string;
-  /**
-   * Enable debug logging for troubleshooting auth issues.
-   * @default false
-   */
-  debug?: boolean;
-}
-
-export interface AuthConfig {
-  AUTH_SERVER_URL: string;
-  REDIRECT_URI: string;
-  CLIENT_ID: string;
-  basePath: string;
-  TOKEN_KEY: string;
-  PKCE_KEY: string;
-  LOGGED_OUT_KEY: string;
-  logoutRedirectPath: string;
-  unauthorizedRedirectPath: string;
-  tokenExpirationBuffer: number;
-  wsPath: string;
-  debug: boolean;
-}
-
-let config: AuthConfig | null = null;
+import type { QueryClient } from "@tanstack/react-query";
+import type { TereoAuthConfig } from "@tereo-io/react";
+import env from "@/lib/env";
 
 /**
- * Configure the UI's auth client.
- * Call it once, before anything that signs in or calls core.
+ * One key per area of core. Auth sits at core's root (`/oauth`, and
+ * `/v1/account`, `/v1/admin` by path); the others under their own `/v1` prefix.
  */
-export const configureAuth = (userConfig: AuthConfigOptions): void => {
-  config = {
-    ...userConfig,
-    TOKEN_KEY: "tereo_tokens",
-    PKCE_KEY: "tereo_pkce",
-    LOGGED_OUT_KEY: "tereo_logged_out",
-    basePath: userConfig.basePath ?? "",
-    logoutRedirectPath: userConfig.logoutRedirectPath ?? "/",
-    unauthorizedRedirectPath: userConfig.unauthorizedRedirectPath ?? "/",
-    tokenExpirationBuffer: userConfig.tokenExpirationBuffer ?? 30000,
-    wsPath: userConfig.wsPath ?? "/ws",
-    debug: userConfig.debug ?? false,
+export type ServiceKey = "auth" | "fileService" | "webhooks" | "audit";
+
+export interface UserOrganization {
+  id: string;
+  name: string;
+  slug: string;
+  memberRole: string;
+}
+
+// A type, not an interface, so it satisfies TereoUser's index signature.
+export type UserInfo = {
+  sub: string;
+  email: string;
+  name?: string;
+  permissions: string[];
+  org_id?: string;
+  org_name?: string;
+  organizations?: UserOrganization[];
+};
+
+// Route paths open to a signed-out visitor; "/" (signedOutPath) always is.
+const isPublicPath = (path: string): boolean =>
+  path.startsWith("/callback") ||
+  path.startsWith("/setup") ||
+  path.startsWith("/consent") ||
+  path.startsWith("/login") ||
+  path.startsWith("/logout") ||
+  // Opened from an email by someone who is signed out.
+  path === "/set-password" ||
+  path === "/forgot-password" ||
+  path === "/verify-email" ||
+  // Public share-unlock page — recipients of a password-protected share link
+  // are typically external users with no account.
+  path.startsWith("/shared/");
+
+export const createCoreAuthConfig = (
+  queryClient: QueryClient
+): TereoAuthConfig => {
+  const apis: Record<ServiceKey, string> = {
+    auth: env.CORE_URL,
+    fileService: `${env.CORE_URL}/v1/files`,
+    webhooks: `${env.CORE_URL}/v1/webhooks`,
+    audit: `${env.CORE_URL}/v1/audit`,
+  };
+
+  return {
+    coreUrl: env.CORE_URL,
+    clientId: env.CLIENT_ID,
+    redirectUri: env.REDIRECT_URI,
+    apis,
+    loadUser: async (clients) => {
+      const { data } = await clients.auth.get<UserInfo>("/oauth/userinfo");
+      return { ...data, permissions: data.permissions ?? [] };
+    },
+    basePath: env.BASE_PATH,
+    signedOutPath: "/",
+    isPublicPath,
+    storagePrefix: "tereo",
+    tokenExpirationBuffer: 60_000,
+    onEvent: (event) => {
+      if (event.type !== "session-revoked") return;
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+      void queryClient.invalidateQueries({ queryKey: ["account", "sessions"] });
+    },
   };
 };
-
-/**
- * Get the current SDK configuration.
- * Throws an error if the SDK hasn't been configured yet.
- */
-const getConfig = (): Required<AuthConfig> => {
-  if (!config) {
-    throw new Error(
-      "Auth not configured. Call configureAuth() before signing in or calling core."
-    );
-  }
-  return config as Required<AuthConfig>;
-};
-
-const env = {
-  get AUTH_SERVER_URL() {
-    return getConfig().AUTH_SERVER_URL;
-  },
-  get REDIRECT_URI() {
-    return getConfig().REDIRECT_URI;
-  },
-  get CLIENT_ID() {
-    return getConfig().CLIENT_ID;
-  },
-  get basePath() {
-    return getConfig().basePath;
-  },
-  get TOKEN_KEY() {
-    return getConfig().TOKEN_KEY;
-  },
-  get PKCE_KEY() {
-    return getConfig().PKCE_KEY;
-  },
-  get LOGGED_OUT_KEY() {
-    return getConfig().LOGGED_OUT_KEY;
-  },
-  get logoutRedirectPath() {
-    return getConfig().logoutRedirectPath;
-  },
-  get unauthorizedRedirectPath() {
-    return getConfig().unauthorizedRedirectPath;
-  },
-  get tokenExpirationBuffer() {
-    return getConfig().tokenExpirationBuffer;
-  },
-  get wsPath() {
-    return getConfig().wsPath;
-  },
-  get debug() {
-    return getConfig().debug;
-  },
-};
-
-export default env;

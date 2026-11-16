@@ -140,6 +140,48 @@ describe("POST /v1/admin/clients", () => {
     expect(data.consentRequired).toBe(true);
   });
 
+  it("creates a client with liveEvents and returns it", async () => {
+    const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: `Live ${generateUniqueId()}`,
+        clientType: "public",
+        redirectUris: ["http://localhost:3000/callback"],
+        grantTypes: ["authorization_code"],
+        liveEvents: true,
+      }),
+    });
+    expect(response.status).toBe(HTTP_STATUS.CREATED);
+    const data = (await response.json()) as ClientResponse;
+    expect(data.liveEvents).toBe(true);
+    const get = await fetch(`${BASE_URL}/v1/admin/clients/${data.id}`, {
+      headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    expect(((await get.json()) as ClientResponse).liveEvents).toBe(true);
+  });
+
+  it("defaults liveEvents to false", async () => {
+    const response = await fetch(`${BASE_URL}/v1/admin/clients`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: `Live default ${generateUniqueId()}`,
+        clientType: "public",
+        redirectUris: ["http://localhost:3000/callback"],
+        grantTypes: ["authorization_code"],
+      }),
+    });
+    expect(response.status).toBe(HTTP_STATUS.CREATED);
+    expect(((await response.json()) as ClientResponse).liveEvents).toBe(false);
+  });
+
   it("persists postLogoutRedirectUris", async () => {
     const postLogoutRedirectUris = ["http://localhost:3000/logged-out"];
     const response = await fetch(`${BASE_URL}/v1/admin/clients`, {

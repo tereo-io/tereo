@@ -23,6 +23,7 @@ const client: OAuthClient = {
   audience: ["billing"],
   trustedCoreScopes: [],
   consentRequired: false,
+  liveEvents: false,
   provisioned: false,
   unprovisionedAt: null,
   ownerId: "u1",
@@ -98,5 +99,27 @@ describe("ClientDetail", () => {
       screen.queryByRole("button", { name: /regenerate/i })
     ).not.toBeInTheDocument();
     expect(screen.queryByTitle("Delete")).not.toBeInTheDocument();
+  });
+
+  it("shows whether live updates are on", async () => {
+    renderDetail({ ...client, liveEvents: true });
+
+    expect(await screen.findByText("Live updates")).toBeVisible();
+    expect(screen.getByText("On")).toBeVisible();
+  });
+
+  it("shows live updates off", async () => {
+    renderDetail(client);
+
+    expect(await screen.findByText("Live updates")).toBeVisible();
+    expect(screen.getByText("Off")).toBeVisible();
+  });
+
+  it("shows live updates read-only on a provisioned client", async () => {
+    renderDetail({ ...client, provisioned: true, liveEvents: true });
+
+    expect(await screen.findByText("Live updates")).toBeVisible();
+    expect(screen.getByText("On")).toBeVisible();
+    expect(screen.queryByTitle("Edit")).not.toBeInTheDocument();
   });
 });

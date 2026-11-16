@@ -77,6 +77,8 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
     client?.consentRequired ?? true
   );
 
+  const [liveEvents, setLiveEvents] = useState(client?.liveEvents ?? false);
+
   // Core refuses both settings on its own login client.
   const isCoreLoginClient = client?.clientId === CORE_LOGIN_CLIENT_ID;
   // The picker lists services, which needs services.read; approve alone does
@@ -130,6 +132,7 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
         )
           updates.audience = audience;
       }
+      if (liveEvents !== client.liveEvents) updates.liveEvents = liveEvents;
       onSubmit(updates);
     } else {
       // Create mode
@@ -141,6 +144,7 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
         scopes,
         grantTypes,
         consentRequired,
+        liveEvents,
         ...(canSetAudience ? { audience } : {}),
       });
     }
@@ -218,6 +222,15 @@ export const ClientForm = ({ client, onSubmit, formId }: ClientFormProps) => {
             />
           </>
         )}
+        <Checkbox
+          label="Live updates"
+          checked={liveEvents}
+          onChange={(e) => setLiveEvents(e.target.checked)}
+        />
+        <p className="v-muted-text">
+          Users signed in through this client can receive live permission and
+          session updates from core.
+        </p>
       </Col>
     </Form>
   );

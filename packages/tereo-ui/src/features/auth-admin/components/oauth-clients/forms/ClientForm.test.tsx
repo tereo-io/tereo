@@ -29,6 +29,7 @@ const stored: OAuthClient = {
   audience: [],
   trustedCoreScopes: [],
   consentRequired: true,
+  liveEvents: false,
   provisioned: false,
   unprovisionedAt: null,
   ownerId: "u1",
@@ -141,5 +142,50 @@ describe("ClientForm audience and consent", () => {
     expect(
       screen.queryByLabelText("Ask users to approve this app")
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ClientForm live updates", () => {
+  it("is off by default and sent on create", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderForm();
+
+    expect(screen.getByLabelText("Live updates")).not.toBeChecked();
+    expect(
+      screen.getByText(
+        "Users signed in through this client can receive live permission and session updates from core."
+      )
+    ).toBeVisible();
+    await user.type(screen.getByLabelText(/^Name/), "New App");
+    await user.click(screen.getByLabelText("Live updates"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ liveEvents: true });
+  });
+
+  it("sends liveEvents false on create when left off", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderForm();
+
+    await user.type(screen.getByLabelText(/^Name/), "New App");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({ liveEvents: false });
+  });
+
+  it("sends only the change when editing", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderForm(stored);
+
+    await user.click(screen.getByLabelText("Live updates"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSubmit.mock.calls[0][0]).toEqual({ liveEvents: true });
+  });
+
+  it("shows the stored value when editing", () => {
+    renderForm({ ...stored, liveEvents: true });
+
+    expect(screen.getByLabelText("Live updates")).toBeChecked();
   });
 });

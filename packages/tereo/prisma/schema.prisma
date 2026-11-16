@@ -206,6 +206,9 @@ model OAuthClient {
   // Core API scopes the user is not asked to approve when consentRequired is
   // false. Set only by provisioning; never core:admin or core:admin.read.
   trustedCoreScopes       String[]   @default([]) @map("trusted_core_scopes")
+  // true: users' tokens from this client may open core's socket for
+  // permission and session signals without a core scope.
+  liveEvents              Boolean    @default(false) @map("live_events")
   // After a regenerate, the replaced secret keeps working until it expires,
   // so running copies of a service survive the rollout.
   previousSecretHash      String?    @map("previous_secret_hash") @db.VarChar(255)

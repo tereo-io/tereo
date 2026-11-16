@@ -76,6 +76,13 @@ live permission updates, without being given the user's account. The 403's messa
 path (`This token's scopes do not reach /v1/account/me; it needs one of: core:account`), and the
 `WWW-Authenticate` challenge lists the scopes of every area that would admit it.
 
+A client with `liveEvents` (`POST/PATCH /v1/admin/clients`, provisioning) needs no scope for the
+socket: its tokens without core scopes are admitted to `/ws` and hear what `core:events` hears.
+That is safe because those events' payloads carry no permission data, only that something changed
+(`{ reason, timestamp }`, the session's id). The token stays `none` everywhere else: `/v1/*` still
+answers 401 `invalid_token`, and `/oauth/userinfo` and introspection are unchanged. The flag is read
+at each handshake, so turning it off refuses new sockets (open ones close with their token).
+
 ### Trusted core scopes
 
 A login client normally sends the user through the consent screen for every `core:*` scope it
@@ -1471,19 +1478,22 @@ a client message may be at most 16 KiB. A socket may send 10 messages at once an
 that; more are dropped, and a client that keeps sending well past the rate is disconnected.
 
 Events go out after the change commits (`websocket/emitters/`). A socket whose token reaches neither
-the user's account nor core's files (`core:events` alone) gets only `auth:permissions:changed` and
+the user's account nor core's files (`core:events` alone, or a `liveEvents` client's token without
+core scopes) gets only `auth:permissions:changed` and
 the `auth:session:revoked` of its own session — nothing naming the user's other sessions,
 organizations or buckets:
 
 | Event                         | Payload                                 | Sent when                                                                                                                                                                                                                              |
 | ----------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth:permissions:changed`    | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, or an admin changes a role they hold (a registry retirement is not notified; the UI sees it on its next token refresh)                                                         |
+| `auth:permissions:changed`    | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, an admin changes a role they hold, or their organization roles or membership change (reasons `org_roles_changed`, `org_membership_changed`; a registry retirement is not notified; the UI sees it when its token is next refreshed, which reloads its userinfo)                                                         |
 | `auth:session:revoked`        | `{ sessionId, timestamp }`              | to the account room and the session's own sockets: one of the user's sessions is revoked; its sockets close after                                                                                                                      |
 | `auth:organization:changed`   | `{ reason, organizationId, timestamp }` | to the account room. `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
 | `files:bucket-access:changed` | `{ bucketName, timestamp }`             | to the files room: a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md))                                                        |
 
-The UI refreshes its token on `auth:permissions:changed` and `auth:organization:changed`; a refresh
-core rejects signs it out.
+The UI (through `@tereo-io/react`) reloads its userinfo on `auth:permissions:changed` and
+`auth:organization:changed`, without refreshing its token, and again whenever its stored token
+changes (a sign-in, an organization switch, a refresh, in any tab). It signs out on the
+`auth:session:revoked` of its own session.
 
 The login-flow pages (consent, org-select, 2FA) get the authorize request's parameters beside their
 session token, only so that "Back to sign in" restarts `/oauth/authorize` for the client that began
@@ -1529,7 +1539,9 @@ cookies (`__Host-trt_{client_id}`, path `/`, no Domain), which the browser refus
 or over http, so a sibling subdomain cannot plant or shadow them; otherwise (development over http,
 or `COOKIE_DOMAIN` set) they are unprefixed and scoped to `/oauth`. Only `/oauth` handlers read
 them; `/v1` authenticates by bearer token alone. The session indicator `tsi_{client_id}`, which
-carries nothing and which the UI reads, is never prefixed. The refresh cookie lives as long as its
+carries nothing, is set beside the refresh cookie and cleared with it for any page of the site that
+wants to know a session exists without a request; core's UI does not read it (it keeps its own
+marker in storage). It is never prefixed. The refresh cookie lives as long as its
 token family, not a fresh `JWT_REFRESH_TOKEN_TTL`. A cookie whose value is not a string (cookie-parser
 turns a `j:` value into JSON) counts as missing.
 
@@ -1548,8 +1560,8 @@ other clients' cookies it carries. Setting the cookie follows the same rule as u
 `/oauth/token` with `refresh_token_response_mode=cookie` answers `403 access_denied`, before the
 grant is spent, to a request from any other origin, so a page elsewhere cannot post its own code or
 refresh token from a visitor's browser and leave that browser signed in to its account. The admin
-UI checks as well (`tereo-ui/src/lib/auth/useRefreshToken.ts`): when a refresh by cookie answers
-with a token whose `sub` is not the user the tab holds a token for, it does not adopt the token,
+UI checks as well (`@tereo-io/react`, `packages/tereo-react/src/refresh.ts`): when a refresh by
+cookie answers with a token whose `sub` is not the user the tab holds a token for, it does not adopt the token,
 clears its stored tokens, marks itself signed out (so the cookie is not refreshed from again) and
 goes to its signed-out page; a load with no stored token has nothing to compare and takes the
 cookie's user. `CORS_ALLOWED_ORIGINS` is only the CORS list: being on it lets a

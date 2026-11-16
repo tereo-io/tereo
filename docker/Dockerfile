@@ -19,11 +19,15 @@ WORKDIR /app
 
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/tereo-ui/package.json ./packages/tereo-ui/
+COPY packages/tereo-react/package.json ./packages/tereo-react/
 
 RUN --mount=type=cache,target=/root/.npm,sharing=shared \
     npm ci --workspace=tereo-ui
 
 COPY packages/tereo-ui ./packages/tereo-ui
+# The UI builds @tereo-io/react from its source.
+COPY packages/tereo-react/tsconfig.json ./packages/tereo-react/
+COPY packages/tereo-react/src ./packages/tereo-react/src
 # The UI build's openapi:sync copies core's bundled spec for the API docs page.
 COPY packages/tereo/openapi ./packages/tereo/openapi
 

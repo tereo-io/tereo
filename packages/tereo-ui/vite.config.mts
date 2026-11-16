@@ -13,9 +13,12 @@ export default defineConfig(() => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Built from source, so the UI tracks the package without building it.
+      "@tereo-io/react": path.resolve(__dirname, "../tereo-react/src/index.ts"),
     },
-    // One copy of each: @kosmeo-ui/react shares the app's React and its
-    // QueryClient context, which a second copy of react-query cannot see.
+    // One copy of each: @kosmeo-ui/react and @tereo-io/react share the app's
+    // React and its QueryClient context, which a second copy of react-query
+    // cannot see.
     dedupe: ["react", "react-dom", "@tanstack/react-query"],
   },
   build: {

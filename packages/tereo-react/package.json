@@ -1,0 +1,68 @@
+{
+  "name": "@tereo-io/react",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Sign a React app in through Tereo: OAuth with PKCE, a session shared by tabs, token-renewing API clients, permission checks and live updates",
+  "keywords": [
+    "tereo",
+    "react",
+    "oauth",
+    "pkce",
+    "auth"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tereo-io/tereo.git",
+    "directory": "packages/tereo-react"
+  },
+  "homepage": "https://github.com/tereo-io/tereo/tree/master/packages/tereo-react#readme",
+  "bugs": {
+    "url": "https://github.com/tereo-io/tereo/issues"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "!dist/tests",
+    "!src/tests",
+    "!**/*.tsbuildinfo",
+    "NOTICE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "author": "Aaron Leman",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5",
+    "axios": "^1",
+    "react": "^19",
+    "socket.io-client": "^4"
+  },
+  "devDependencies": {
+    "@tanstack/react-query": "^5.104.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "axios": "^1.20.0",
+    "jsdom": "^30.1.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "socket.io-client": "^4.8.4",
+    "typescript": "^6.0.3",
+    "vitest": "^5.0.4"
+  }
+}

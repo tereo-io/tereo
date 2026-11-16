@@ -757,6 +757,7 @@ const clientFields = (spec: ResolvedClient) => ({
   audience: sortedUnique(spec.audience),
   consentRequired: spec.consentRequired,
   trustedCoreScopes: sortedUnique(spec.trustedCoreScopes),
+  liveEvents: spec.liveEvents,
 });
 
 const applyClient = async (

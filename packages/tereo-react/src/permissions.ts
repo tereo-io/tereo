@@ -3,20 +3,25 @@ export type PermissionRequirement = string | readonly string[];
 
 const ADMIN_LEVEL = 5;
 
-export const hasPermission = (
-  userPermissions: string[],
-  requiredPermission: string
-): boolean => {
-  if (userPermissions.includes("admin")) return true;
-  if (userPermissions.includes(requiredPermission)) return true;
+const holdsPermission = (held: string[], required: string): boolean => {
+  if (held.includes("admin")) return true;
+  if (held.includes(required)) return true;
 
-  for (const userPerm of userPermissions) {
-    if (isAdminCovering(userPerm, requiredPermission)) return true;
-    if (hasPermissionLevel(userPerm, requiredPermission)) return true;
+  for (const userPerm of held) {
+    if (isAdminCovering(userPerm, required)) return true;
+    if (hasPermissionLevel(userPerm, required)) return true;
   }
 
   return false;
 };
+
+export const hasPermission = (
+  held: string[],
+  required: PermissionRequirement
+): boolean =>
+  typeof required === "string"
+    ? holdsPermission(held, required)
+    : required.some((permission) => holdsPermission(held, permission));
 
 const isAdminCovering = (
   userPermission: string,
