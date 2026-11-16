@@ -28,3 +28,7 @@ export {
 export { completeSignIn, signIn } from "./signIn.js";
 export { isRefreshRejected, refreshTokens } from "./refresh.js";
 export { signOut } from "./signOut.js";
+export { createApiClients } from "./api.js";
+export { TereoAuthProvider } from "./provider.js";
+export type { ApiClients, AuthState } from "./provider.js";
+export { useApi, useAuth, useCompleteSignIn, usePublicApi } from "./hooks.js";

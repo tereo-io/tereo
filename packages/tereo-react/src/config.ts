@@ -57,7 +57,7 @@ export interface StorageKeys {
 export type ResolvedConfig = Required<Omit<TereoAuthConfig, "onEvent">> &
   Pick<TereoAuthConfig, "onEvent"> & { keys: StorageKeys };
 
-const pathWithoutBase = (pathname: string, basePath: string): string =>
+export const pathWithoutBase = (pathname: string, basePath: string): string =>
   basePath && (pathname === basePath || pathname.startsWith(`${basePath}/`))
     ? pathname.slice(basePath.length) || "/"
     : pathname;
