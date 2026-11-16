@@ -88,6 +88,16 @@ describe("signIn", () => {
     expect(localStorage.getItem(config.keys.pkce)).toBeNull();
   });
 
+  it("lets the protocol parameters win over params, but not scope", async () => {
+    const { p } = await startSignIn({
+      params: { state: "forged", client_id: "evil", scope: "openid" },
+    });
+    const saved = JSON.parse(sessionStorage.getItem(config.keys.pkce)!);
+    expect(p.get("state")).toBe(saved.state);
+    expect(p.get("client_id")).toBe("app");
+    expect(p.get("scope")).toBe("openid");
+  });
+
   it("keeps returnTo only for in-app paths", async () => {
     const kept = async (returnTo: string) => {
       sessionStorage.clear();
@@ -211,6 +221,24 @@ describe("completeSignIn", () => {
       completeSignIn(new URLSearchParams({ error: "access_denied" }))
     ).rejects.toThrow("access_denied");
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("clears the saved PKCE entry when core's error carries its state", async () => {
+    const { state } = await begin();
+    await expect(
+      completeSignIn(new URLSearchParams({ error: "access_denied", state }))
+    ).rejects.toThrow("access_denied");
+    expect(sessionStorage.getItem(config.keys.pkce)).toBeNull();
+  });
+
+  it("keeps the saved PKCE entry when the error's state differs", async () => {
+    await begin();
+    await expect(
+      completeSignIn(
+        new URLSearchParams({ error: "access_denied", state: "other" })
+      )
+    ).rejects.toThrow("access_denied");
+    expect(sessionStorage.getItem(config.keys.pkce)).not.toBeNull();
   });
 
   it("rejects a callback without code or state", async () => {

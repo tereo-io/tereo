@@ -91,6 +91,8 @@ export const signIn = async (
   sessionStorage.setItem(keys.pkce, JSON.stringify(challenge));
 
   const params = new URLSearchParams({
+    scope: scopes,
+    ...opts.params,
     response_type: "code",
     client_id: clientId,
     redirect_uri: redirectUri,
@@ -98,8 +100,6 @@ export const signIn = async (
     nonce: challenge.nonce,
     code_challenge: challenge.codeChallenge,
     code_challenge_method: "S256",
-    scope: scopes,
-    ...opts.params,
   });
 
   window.location.href = `${coreUrl}/oauth/authorize?${params}`;
@@ -111,11 +111,15 @@ export const completeSignIn = async (
 ): Promise<{ returnTo: string | null }> => {
   const { coreUrl, clientId, redirectUri, requestTimeoutMs } = activeConfig();
 
-  const error = search.get("error");
-  if (error) throw new Error(error);
-
   const code = search.get("code");
   const state = search.get("state");
+
+  const error = search.get("error");
+  if (error) {
+    // The flow is over; a matching state means the saved entry is this one's.
+    if (state && readPKCE()?.state === state) clearPKCE();
+    throw new Error(error);
+  }
   if (!code || !state) {
     throw new Error("The sign-in response is missing its code or state.");
   }
