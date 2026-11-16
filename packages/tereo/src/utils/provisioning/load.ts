@@ -160,6 +160,7 @@ export interface ResolvedClient {
   audience: string[];
   consentRequired: boolean;
   trustedCoreScopes: string[];
+  liveEvents: boolean;
 }
 
 export interface ResolvedIntegration {
@@ -463,6 +464,7 @@ const buildSet = ({
         audience: c.audience,
         consentRequired: c.consentRequired,
         trustedCoreScopes: c.trustedCoreScopes,
+        liveEvents: c.liveEvents,
       })),
       roles: data.roles ?? [],
       ...(data.guests && { guests: data.guests }),

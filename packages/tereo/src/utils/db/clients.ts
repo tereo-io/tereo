@@ -9,8 +9,7 @@ import {
   UserType,
 } from "../../../prisma/generated/client/index.js";
 
-interface CreateClientData extends Omit<CreateClientInput, "liveEvents"> {
-  liveEvents?: boolean;
+interface CreateClientData extends CreateClientInput {
   clientId: string;
   clientSecret: string | null;
   ownerId: string;

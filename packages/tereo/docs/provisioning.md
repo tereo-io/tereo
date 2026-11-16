@@ -244,6 +244,7 @@ Login clients, as made in the admin UI.
 | `audience` | Services of the set its tokens may name. Unlike a hand-made client's audience, no `services.approve` is involved: the documents are the deploy's decision |
 | `consentRequired` | Default `true`. `false` skips consent after a login (silent `prompt=none` included), unless the request asks for a `core:*` scope not in `trustedCoreScopes`. It grants no core API access beyond the scopes |
 | `trustedCoreScopes` | Default `[]`. Core scopes a first-party app gets without the consent screen when `consentRequired` is `false`. Each must be a core scope listed in `scopes`; `core:admin` and `core:admin.read` are refused. Settable only here: hand-made clients have none |
+| `liveEvents` | Default `false`. Users signed in through this client may open core's socket (`/ws`) and receive `auth:permissions:changed` and their own session's `auth:session:revoked`, without a core scope. Also settable in the admin UI and API for hand-made clients |
 | `description` | Optional, max 500 |
 
 ### `integrations`

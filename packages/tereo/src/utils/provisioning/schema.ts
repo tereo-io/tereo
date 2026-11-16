@@ -44,6 +44,7 @@ const ClientEntry = z
     consentRequired: z.boolean().default(true),
     // Checked by load: core scopes in `scopes`, never the admin ones.
     trustedCoreScopes: z.array(Text).default([]),
+    liveEvents: z.boolean().default(false),
     description: Description.optional(),
   })
   .strict();

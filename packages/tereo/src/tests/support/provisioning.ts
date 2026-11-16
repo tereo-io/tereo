@@ -306,6 +306,7 @@ export const newClientSpec = (
   audience: [],
   consentRequired: true,
   trustedCoreScopes: [],
+  liveEvents: false,
   ...extra,
 });
 

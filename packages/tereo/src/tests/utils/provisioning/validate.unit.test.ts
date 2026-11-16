@@ -58,6 +58,7 @@ const clientOf = (
   audience: [],
   consentRequired: true,
   trustedCoreScopes: [],
+  liveEvents: false,
   ...c,
 });
 

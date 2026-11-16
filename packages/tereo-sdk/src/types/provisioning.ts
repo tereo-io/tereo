@@ -109,6 +109,8 @@ export interface LoginClientProvisioning {
    * `consentRequired` is false. Never `core:admin` or `core:admin.read`.
    */
   trustedCoreScopes?: string[];
+  /** Default false. Users' tokens from this client may open core's socket for live permission and session signals. */
+  liveEvents?: boolean;
   description?: string;
 }
 
