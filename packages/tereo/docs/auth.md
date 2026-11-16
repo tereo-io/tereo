@@ -1485,13 +1485,15 @@ organizations or buckets:
 
 | Event                         | Payload                                 | Sent when                                                                                                                                                                                                                              |
 | ----------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `auth:permissions:changed`    | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, an admin changes a role they hold, or their organization roles or membership change (reasons `org_roles_changed`, `org_membership_changed`; a registry retirement is not notified; the UI sees it on its next token refresh)                                                         |
+| `auth:permissions:changed`    | `{ reason, timestamp }`                 | to every socket of the user: their global roles change, an admin changes a role they hold, or their organization roles or membership change (reasons `org_roles_changed`, `org_membership_changed`; a registry retirement is not notified; the UI sees it when its token is next refreshed, which reloads its userinfo)                                                         |
 | `auth:session:revoked`        | `{ sessionId, timestamp }`              | to the account room and the session's own sockets: one of the user's sessions is revoked; its sockets close after                                                                                                                      |
 | `auth:organization:changed`   | `{ reason, organizationId, timestamp }` | to the account room. `membership_changed`: added, removed, or member tier changed; `roles_changed`: org-scoped roles set; `org_deactivated`: to every member, after the organization's tokens are revoked and before its sockets close |
 | `files:bucket-access:changed` | `{ bucketName, timestamp }`             | to the files room: a bucket grant was given to or revoked from the user (a member removal included), or the bucket's ownership moved to or from them (see [files.md](files.md))                                                        |
 
-The UI refreshes its token on `auth:permissions:changed` and `auth:organization:changed`; a refresh
-core rejects signs it out.
+The UI (through `@tereo-io/react`) reloads its userinfo on `auth:permissions:changed` and
+`auth:organization:changed`, without refreshing its token, and again whenever its stored token
+changes (a sign-in, an organization switch, a refresh, in any tab). It signs out on the
+`auth:session:revoked` of its own session.
 
 The login-flow pages (consent, org-select, 2FA) get the authorize request's parameters beside their
 session token, only so that "Back to sign in" restarts `/oauth/authorize` for the client that began
@@ -1537,7 +1539,9 @@ cookies (`__Host-trt_{client_id}`, path `/`, no Domain), which the browser refus
 or over http, so a sibling subdomain cannot plant or shadow them; otherwise (development over http,
 or `COOKIE_DOMAIN` set) they are unprefixed and scoped to `/oauth`. Only `/oauth` handlers read
 them; `/v1` authenticates by bearer token alone. The session indicator `tsi_{client_id}`, which
-carries nothing and which the UI reads, is never prefixed. The refresh cookie lives as long as its
+carries nothing, is set beside the refresh cookie and cleared with it for any page of the site that
+wants to know a session exists without a request; core's UI does not read it (it keeps its own
+marker in storage). It is never prefixed. The refresh cookie lives as long as its
 token family, not a fresh `JWT_REFRESH_TOKEN_TTL`. A cookie whose value is not a string (cookie-parser
 turns a `j:` value into JSON) counts as missing.
 
