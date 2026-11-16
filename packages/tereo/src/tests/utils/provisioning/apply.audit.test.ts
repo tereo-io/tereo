@@ -190,6 +190,21 @@ describe("applyProvisioning", () => {
     });
   });
 
+  it("applies liveEvents, turns it off when dropped and audits the change", async () => {
+    const spec = clientSpec({ liveEvents: true });
+    await apply(clientsDoc(spec));
+    const row = await clientRow(spec.clientId);
+    expect(row.liveEvents).toBe(true);
+
+    const result = await apply(clientsDoc({ ...spec, liveEvents: false }));
+    expect(result.updated).toEqual([`client:${spec.clientId}`]);
+    expect((await clientRow(spec.clientId)).liveEvents).toBe(false);
+    const update = await prisma.auditLogEntry.findFirstOrThrow({
+      where: { entityId: row.id, action: "UPDATE" },
+    });
+    expect(update.changes).toEqual({ liveEvents: { old: true, new: false } });
+  });
+
   describe("custom roles", () => {
     const roleSpec = (
       permissions: string[],

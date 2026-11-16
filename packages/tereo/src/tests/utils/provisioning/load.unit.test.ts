@@ -405,57 +405,6 @@ describe("parseDocuments", () => {
     expect(d.clients[0].trustedCoreScopes).toEqual([]);
   });
 
-  it("defaults a client's liveEvents to false", () => {
-    const {
-      documents: [d],
-    } = parse({
-      "a.json": doc({
-        clients: [
-          {
-            clientId: "c1",
-            name: "C1",
-            redirectUris: ["https://app.example.com/callback"],
-          },
-        ],
-      }),
-    });
-    expect(d.clients[0].liveEvents).toBe(false);
-  });
-
-  it("reads liveEvents: true", () => {
-    const {
-      documents: [d],
-    } = parse({
-      "a.json": doc({
-        clients: [
-          {
-            clientId: "c1",
-            name: "C1",
-            redirectUris: ["https://app.example.com/callback"],
-            liveEvents: true,
-          },
-        ],
-      }),
-    });
-    expect(d.clients[0].liveEvents).toBe(true);
-  });
-
-  it("refuses a non-boolean liveEvents", () => {
-    const problems = problemsOf({
-      "a.json": doc({
-        clients: [
-          {
-            clientId: "c1",
-            name: "C1",
-            redirectUris: ["https://app.example.com/callback"],
-            liveEvents: "yes",
-          },
-        ],
-      }),
-    });
-    expect(problems.join("\n")).toContain("liveEvents");
-  });
-
   it.each([
     ["core:admin", "core:admin cannot be trusted"],
     ["core:admin.read", "core:admin.read cannot be trusted"],

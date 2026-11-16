@@ -2,6 +2,9 @@
 // @module-tag auth
 // @module-tag audit
 import { DEFAULT_ORGANIZATION_ID } from "../../../../../../definitions/index.js";
+import { getAccessTokenForUser } from "../../../../../support/auth/login.js";
+import { createTestClient } from "../../../../../support/auth/clients.js";
+import { createAdminUser } from "../../../../../support/auth/users.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "../../../../../../utils/db/prisma.js";
 import { CORE_URL } from "../../../../../support/coreUrl.js";
@@ -150,5 +153,37 @@ describe("DELETE /v1/admin/clients/:id branding side effects", () => {
         },
       })
     ).toBe(0);
+  });
+});
+
+describe("PATCH /v1/admin/clients/:id liveEvents", () => {
+  let adminToken: string;
+
+  beforeAll(async () => {
+    adminToken = await getAccessTokenForUser(
+      await createAdminUser(),
+      await createTestClient()
+    );
+  });
+
+  it("updates liveEvents, reads it back and audits the change", async () => {
+    const client = await createTestClient({ clientType: "confidential" });
+    const url = `${CORE_URL}/v1/admin/clients/${client.id}`;
+    const patch = await fetchJson("PATCH", url, adminToken, {
+      liveEvents: true,
+    });
+    expect(patch.status).toBe(200);
+    expect(patch.body.liveEvents).toBe(true);
+    const get = await fetchJson("GET", url, adminToken);
+    expect(get.body.liveEvents).toBe(true);
+
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityId: client.id,
+        entityType: "OAuthClient",
+        action: "UPDATE",
+      },
+    });
+    expect(entry.changes).toEqual({ liveEvents: { old: false, new: true } });
   });
 });

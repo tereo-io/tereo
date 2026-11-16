@@ -290,16 +290,6 @@ describe("applyProvisioning", () => {
     ]);
   });
 
-  it("applies liveEvents and turns it off when dropped", async () => {
-    const spec = clientSpec({ liveEvents: true });
-    await apply(clientsDoc(spec));
-    expect((await clientRow(spec.clientId)).liveEvents).toBe(true);
-
-    const result = await apply(clientsDoc({ ...spec, liveEvents: false }));
-    expect(result.updated).toEqual([`client:${spec.clientId}`]);
-    expect((await clientRow(spec.clientId)).liveEvents).toBe(false);
-  });
-
   it("is idempotent: a second apply changes nothing and writes no audit entry", async () => {
     const d = serviceDoc();
     Object.assign(d.service, ownerDeclaration(d.service.namespace));
