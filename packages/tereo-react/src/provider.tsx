@@ -1,16 +1,20 @@
 import { type PermissionRequirement, hasPermission } from "./permissions.js";
+import { type StoredTokens, decodeJwt, readTokens } from "./tokens.js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { type StoredTokens } from "./tokens.js";
+import { type EventSocket, startTereoEvents } from "./events.js";
 import { useStoredValue } from "./storage.js";
 import { refreshTokens } from "./refresh.js";
 import { createApiClients } from "./api.js";
 import type { AxiosInstance } from "axios";
 import { hasSession } from "./markers.js";
+import { debugLog } from "./logger.js";
 import { signOut } from "./signOut.js";
+import { io } from "socket.io-client";
 import { signIn } from "./signIn.js";
 import {
   type ResolvedConfig,
   type TereoAuthConfig,
+  type TereoEvent,
   type TereoUser,
   pathWithoutBase,
   resolveConfig,
@@ -22,6 +26,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -47,6 +52,9 @@ export const AuthContext = createContext<AuthState | null>(null);
 export const ApiContext = createContext<ApiClients | null>(null);
 
 const userKey = (clientId: string) => ["tereo", "user", clientId] as const;
+
+// Events that arrive together reload the user once.
+const RELOAD_DEBOUNCE_MS = 250;
 
 const currentRoutePath = (config: ResolvedConfig): string =>
   pathWithoutBase(window.location.pathname, config.basePath).replace(
@@ -74,7 +82,7 @@ export const TereoAuthProvider = ({
   const queryClient = useQueryClient();
   const clients = useMemo(() => createApiClients(apis), [apis]);
   const tokens = useStoredValue<StoredTokens>(keys.tokens);
-  const queryKey = userKey(clientId);
+  const queryKey = useMemo(() => userKey(clientId), [clientId]);
 
   // A page load with a session but no token (the access token lives in
   // storage the tab may not have): renew it before deciding anything.
@@ -125,8 +133,86 @@ export const TereoAuthProvider = ({
     [queryClient, queryKey]
   );
 
-  // Live updates (core's socket) attach here and drive `isLive`.
-  const isLive = false;
+  // Keyed on the user, not the token: the token (and its sid) rotates on
+  // every refresh, and the events loop reads the current one at each
+  // handshake.
+  const accessToken = tokens?.access_token;
+  const userId = useMemo(() => {
+    const sub = accessToken ? decodeJwt(accessToken)?.sub : null;
+    return typeof sub === "string" ? sub : null;
+  }, [accessToken]);
+
+  const [isLive, setIsLive] = useState(false);
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!resolved.live || !userId) return;
+
+    const handleEvent = (event: TereoEvent) => {
+      resolved.onEvent?.(event);
+      if (event.type === "session-revoked") return;
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(() => {
+        reloadTimer.current = null;
+        void reloadUser();
+      }, RELOAD_DEBOUNCE_MS);
+    };
+
+    // Deferred to a microtask so StrictMode's mount, unmount, mount cancels
+    // before a handshake starts.
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      stop = startTereoEvents({
+        // socket.io treats a URL's path as a namespace; core serves the
+        // socket at `wsPath`, so only the origin goes in the URL.
+        createSocket: (auth) => {
+          const socket = io(new URL(resolved.coreUrl).origin, {
+            path: resolved.wsPath,
+            transports: ["websocket", "polling"],
+            autoConnect: false,
+            auth,
+          });
+          socket.on("connect", () => setIsLive(true));
+          socket.on("disconnect", () => setIsLive(false));
+          socket.on("connect_error", () => setIsLive(false));
+          return socket as unknown as EventSocket;
+        },
+        accessToken: () => readTokens()?.access_token ?? null,
+        tokenIsFresh: () => {
+          const stored = readTokens();
+          return (
+            !!stored &&
+            Date.now() < stored.expiresAt - resolved.tokenExpirationBuffer
+          );
+        },
+        sessionId: () => {
+          const token = readTokens()?.access_token;
+          const sid = token ? decodeJwt(token)?.sid : null;
+          return typeof sid === "string" ? sid : null;
+        },
+        refresh: refreshTokens,
+        signOut: () => void signOut(),
+        onEvent: handleEvent,
+        refused: (reason) => debugLog("Events socket stopped:", reason),
+        log: (message, detail) => debugLog(message, detail),
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      stop?.();
+      setIsLive(false);
+    };
+  }, [userId, resolved, reloadUser]);
 
   const value = useMemo<AuthState>(
     () => ({
@@ -145,6 +231,7 @@ export const TereoAuthProvider = ({
       restoring,
       query.isLoading,
       query.isFetching,
+      isLive,
       check,
       switchOrganization,
       reloadUser,
