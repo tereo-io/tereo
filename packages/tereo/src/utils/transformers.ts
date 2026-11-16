@@ -24,6 +24,7 @@ export const formatClient = (
     audience: string[];
     consentRequired: boolean;
     trustedCoreScopes: string[];
+    liveEvents: boolean;
     provisioned: boolean;
     unprovisionedAt: Date | null;
     ownerId: string;
@@ -60,6 +61,7 @@ export const formatClient = (
     audience: client.audience,
     consentRequired: client.consentRequired,
     trustedCoreScopes: client.trustedCoreScopes,
+    liveEvents: client.liveEvents,
     provisioned: client.provisioned,
     unprovisionedAt: client.unprovisionedAt?.toISOString() ?? null,
     ownerId: client.ownerId,

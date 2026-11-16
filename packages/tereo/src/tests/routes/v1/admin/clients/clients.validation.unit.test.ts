@@ -21,6 +21,16 @@ describe("POST /v1/admin/clients", () => {
         ["grantTypes"],
       ],
       [
+        "a non-boolean liveEvents",
+        {
+          name: "Live",
+          clientType: "confidential",
+          grantTypes: ["authorization_code"],
+          liveEvents: "yes",
+        },
+        ["liveEvents"],
+      ],
+      [
         "the client_credentials grant: a machine identity is added as a service",
         {
           name: "Machine",

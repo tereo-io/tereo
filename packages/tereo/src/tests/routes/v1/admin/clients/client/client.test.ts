@@ -183,6 +183,53 @@ describe("PATCH /v1/admin/clients/:id", () => {
     expect(((await get.json()) as ClientResponse).consentRequired).toBe(false);
   });
 
+  it("updates liveEvents, reads it back and audits the change", async () => {
+    const client = await createTestClient({ clientType: "confidential" });
+    const url = `${BASE_URL}/v1/admin/clients/${client.id}`;
+    const headers = {
+      Authorization: `Bearer ${adminToken}`,
+      "Content-Type": "application/json",
+    };
+    const patch = await fetch(url, {
+      method: "PATCH",
+      headers,
+      body: JSON.stringify({ liveEvents: true }),
+    });
+    expect(patch.status).toBe(HTTP_STATUS.OK);
+    expect(((await patch.json()) as ClientResponse).liveEvents).toBe(true);
+    const get = await fetch(url, { headers });
+    expect(((await get.json()) as ClientResponse).liveEvents).toBe(true);
+
+    const entry = await prisma.auditLogEntry.findFirstOrThrow({
+      where: {
+        entityId: client.id,
+        entityType: "OAuthClient",
+        action: "UPDATE",
+      },
+    });
+    expect(entry.changes).toEqual({ liveEvents: { old: false, new: true } });
+  });
+
+  it("refuses liveEvents on a provisioned client", async () => {
+    const client = await createTestClient({ clientType: "confidential" });
+    await prisma.oAuthClient.update({
+      where: { id: client.id },
+      data: { provisioned: true },
+    });
+    const response = await fetch(`${BASE_URL}/v1/admin/clients/${client.id}`, {
+      method: "PATCH",
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ liveEvents: true }),
+    });
+    expect(response.status).toBe(HTTP_STATUS.CONFLICT);
+    expect(((await response.json()) as ErrorResponse).error).toBe(
+      "managed_by_provisioning"
+    );
+  });
+
   it("should update redirect URIs", async () => {
     const newRedirectUris = [
       "http://localhost:3000/callback",

@@ -17,6 +17,8 @@ export const UpdateClientSchema = z.object({
   ownerId: z.guid().optional(),
   consentRequired: z.boolean().optional(),
   audience: AudienceSchema.optional(),
+  // true: users' tokens from this client may open core's socket for permission and session signals without a core scope.
+  liveEvents: z.boolean().optional(),
 });
 
 export type UpdateClientInput = z.infer<typeof UpdateClientSchema>;

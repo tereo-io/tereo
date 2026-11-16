@@ -9,7 +9,8 @@ import {
   UserType,
 } from "../../../prisma/generated/client/index.js";
 
-interface CreateClientData extends CreateClientInput {
+interface CreateClientData extends Omit<CreateClientInput, "liveEvents"> {
+  liveEvents?: boolean;
   clientId: string;
   clientSecret: string | null;
   ownerId: string;
@@ -42,6 +43,7 @@ export interface ClientRecord {
   audience: string[];
   consentRequired: boolean;
   trustedCoreScopes: string[];
+  liveEvents: boolean;
   provisioned: boolean;
   unprovisionedAt: Date | null;
   ownerId: string;
@@ -202,6 +204,7 @@ export const create = async (
       ownerId: data.ownerId,
       provisioned: data.provisioned,
       trustedCoreScopes: data.trustedCoreScopes,
+      liveEvents: data.liveEvents,
     },
     include: { serviceAccountUser: true },
   });
@@ -225,6 +228,7 @@ export const update = async (
       grantTypes: data.grantTypes,
       consentRequired: data.consentRequired,
       audience: data.audience,
+      liveEvents: data.liveEvents,
       ...(data.ownerId && { ownerId: data.ownerId }),
     },
     include: { serviceAccountUser: true },

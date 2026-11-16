@@ -37,6 +37,8 @@ export const CreateClientSchema = z
     grantTypes: z.array(GrantTypeEnum).min(1),
     consentRequired: z.boolean().default(true),
     audience: AudienceSchema.default([]),
+    // true: users' tokens from this client may open core's socket for permission and session signals without a core scope.
+    liveEvents: z.boolean().default(false),
   })
   .refine(
     (data) => {

@@ -26858,6 +26858,7 @@ components:
         - audience
         - consentRequired
         - trustedCoreScopes
+        - liveEvents
         - provisioned
         - unprovisionedAt
         - ownerId
@@ -26928,6 +26929,12 @@ components:
           description: |
             Core scopes users are not asked to approve when `consentRequired` is
             `false`. Set only by provisioning; empty on clients made here.
+        liveEvents:
+          type: boolean
+          description: |
+            Whether users' tokens from this client may open core's socket
+            (`/ws`) for permission and session signals without a core scope.
+            Locked (`409`) on provisioned clients.
         provisioned:
           type: boolean
           description: |
@@ -27102,6 +27109,13 @@ components:
             `false` (provisioned clients may trust some; see
             `trustedCoreScopes`). Core's own login client never asks, and
             refuses a change (`409`).
+        liveEvents:
+          type: boolean
+          default: false
+          description: |
+            Whether users' tokens from this client may open core's socket
+            (`/ws`) for permission and session signals without a core scope.
+            Locked (`409`) on provisioned clients.
     UpdateClientRequest:
       type: object
       properties:
@@ -27167,6 +27181,12 @@ components:
             `false` (provisioned clients may trust some; see
             `trustedCoreScopes`). Core's own login client never asks, and
             refuses a change (`409`).
+        liveEvents:
+          type: boolean
+          description: |
+            Whether users' tokens from this client may open core's socket
+            (`/ws`) for permission and session signals without a core scope.
+            Locked (`409`) on provisioned clients.
         ownerId:
           type: string
           format: uuid
