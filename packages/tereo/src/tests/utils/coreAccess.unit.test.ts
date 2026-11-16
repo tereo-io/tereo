@@ -4,6 +4,7 @@ import { hasPermission } from "../../utils/permissions.js";
 import { coreScopesOf } from "../../definitions/index.js";
 import { describe, it, expect } from "vitest";
 import {
+  admitsLiveEvents,
   allowsArea,
   effectivePermissions,
   resolveCoreAccess,
@@ -153,5 +154,24 @@ describe("tokenAudience", () => {
     expect(
       tokenAudience(["reporting-service"], ["openid", "core:account"])
     ).toEqual(["reporting-service", "core"]);
+  });
+});
+
+describe("admitsLiveEvents", () => {
+  const live = { liveEvents: true };
+  const notLive = { liveEvents: false };
+
+  it("admits a token without core scopes only for a liveEvents client", () => {
+    expect(admitsLiveEvents({ kind: "none" }, live)).toBe(true);
+    expect(admitsLiveEvents({ kind: "none" }, notLive)).toBe(false);
+  });
+
+  it("does not let liveEvents widen a delegated token past the socket's areas", () => {
+    expect(admitsLiveEvents(delegated("core:files"), live)).toBe(false);
+    expect(admitsLiveEvents(delegated("core:events"), notLive)).toBe(true);
+  });
+
+  it("admits full access", () => {
+    expect(admitsLiveEvents({ kind: "full" }, notLive)).toBe(true);
   });
 });

@@ -55,6 +55,19 @@ export const allowsArea = (
 };
 
 /**
+ * Whether the token may open the socket: whatever reaches the account or
+ * events areas, and a `liveEvents` client's token without core scopes. That
+ * token stays `none` everywhere else; the socket only tells it that
+ * something changed, never what.
+ */
+export const admitsLiveEvents = (
+  access: CoreAccess,
+  client: { liveEvents: boolean }
+): boolean =>
+  allowsArea(access, ["account", "events"]) ||
+  (access.kind === "none" && client.liveEvents);
+
+/**
  * The permissions that hold for the token: `live` itself for full access,
  * otherwise each live permission met with each ceiling — the narrower of the
  * two where one covers the other. Coverage is hierarchical (`admin` ⊇

@@ -76,6 +76,13 @@ live permission updates, without being given the user's account. The 403's messa
 path (`This token's scopes do not reach /v1/account/me; it needs one of: core:account`), and the
 `WWW-Authenticate` challenge lists the scopes of every area that would admit it.
 
+A client with `liveEvents` (`POST/PATCH /v1/admin/clients`, provisioning) needs no scope for the
+socket: its tokens without core scopes are admitted to `/ws` and hear what `core:events` hears.
+That is safe because those events' payloads carry no permission data, only that something changed
+(`{ reason, timestamp }`, the session's id). The token stays `none` everywhere else: `/v1/*` still
+answers 401 `invalid_token`, and `/oauth/userinfo` and introspection are unchanged. The flag is read
+at each handshake, so turning it off refuses new sockets (open ones close with their token).
+
 ### Trusted core scopes
 
 A login client normally sends the user through the consent screen for every `core:*` scope it
@@ -1471,7 +1478,8 @@ a client message may be at most 16 KiB. A socket may send 10 messages at once an
 that; more are dropped, and a client that keeps sending well past the rate is disconnected.
 
 Events go out after the change commits (`websocket/emitters/`). A socket whose token reaches neither
-the user's account nor core's files (`core:events` alone) gets only `auth:permissions:changed` and
+the user's account nor core's files (`core:events` alone, or a `liveEvents` client's token without
+core scopes) gets only `auth:permissions:changed` and
 the `auth:session:revoked` of its own session — nothing naming the user's other sessions,
 organizations or buckets:
 

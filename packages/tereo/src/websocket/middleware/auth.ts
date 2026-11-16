@@ -1,6 +1,6 @@
+import { admitsLiveEvents, allowsArea } from "../../utils/coreAccess.js";
 import { bearerToken, verifyAccessToken } from "../../utils/tokens.js";
 import { checkAccessToken } from "../../utils/sessions.js";
-import { allowsArea } from "../../utils/coreAccess.js";
 import { logger } from "../../utils/logger.js";
 import type { Socket } from "socket.io";
 
@@ -40,7 +40,7 @@ export const authenticateSocket = async (
       return next(new Error("Invalid token subject"));
     }
     // The socket carries the user's own account events.
-    if (!allowsArea(check.access, ["account", "events"])) {
+    if (!admitsLiveEvents(check.access, check.token.client)) {
       return next(new Error("This token is not issued for core's API"));
     }
     const { user, token: stored } = check;
