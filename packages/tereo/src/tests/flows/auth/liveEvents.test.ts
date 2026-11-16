@@ -6,8 +6,10 @@ import { createTestClient } from "../../support/auth/clients.js";
 import { describe, it, expect, beforeAll } from "vitest";
 import { prisma } from "../../../utils/db/prisma.js";
 import {
+  ensureTestMembership,
   ensureTestOrganization,
   getTestPrincipalToken,
+  testOrgId,
 } from "../../support/principals.js";
 import {
   connect,
@@ -32,6 +34,23 @@ const signInAccount = signInFor(() => account, REDIRECT_URI);
 
 const setLiveEvents = (client: Client, liveEvents: boolean) =>
   prisma.oAuthClient.update({ where: { id: client.id }, data: { liveEvents } });
+
+const setOrgRoles = async (orgId: string, userId: string) => {
+  const res = await fetch(
+    `${BASE_URL}/v1/admin/organizations/${orgId}/members/${userId}/roles`,
+    {
+      method: "PUT",
+      headers: {
+        Authorization: `Bearer ${await getTestPrincipalToken({
+          permissions: ["organizations.write"],
+        })}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ roleIds: [] }),
+    }
+  );
+  expect(res.status).toBe(HTTP_STATUS.OK);
+};
 
 const replaceRoles = async (userId: string) => {
   const res = await fetch(`${BASE_URL}/v1/admin/users/${userId}/roles`, {
@@ -152,6 +171,42 @@ describe("a liveEvents client's token without core scopes", () => {
       );
     } finally {
       second.close();
+    }
+  });
+
+  it("delivers an org role change to a liveEvents socket", async () => {
+    const { user, accessToken } = await signInLive("openid");
+    const orgId = testOrgId(`live-events-roles-${user.id}`);
+    await ensureTestMembership(user.id, orgId);
+    const socket = connect(accessToken);
+    try {
+      expect(await socket.connected).toBeNull();
+      await setOrgRoles(orgId, user.id);
+      await received(socket, "auth:permissions:changed");
+      expect(socket.events).toContainEqual({
+        name: "auth:permissions:changed",
+        payload: expect.objectContaining({ reason: "org_roles_changed" }),
+      });
+    } finally {
+      socket.close();
+    }
+  });
+
+  it("delivers an org role change to a core:events socket", async () => {
+    const { user, accessToken } = await signInAccount("openid core:events");
+    const orgId = testOrgId(`events-roles-${user.id}`);
+    await ensureTestMembership(user.id, orgId);
+    const socket = connect(accessToken);
+    try {
+      expect(await socket.connected).toBeNull();
+      await setOrgRoles(orgId, user.id);
+      await received(socket, "auth:permissions:changed");
+      expect(socket.events).toContainEqual({
+        name: "auth:permissions:changed",
+        payload: expect.objectContaining({ reason: "org_roles_changed" }),
+      });
+    } finally {
+      socket.close();
     }
   });
 

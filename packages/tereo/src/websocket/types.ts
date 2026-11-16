@@ -37,7 +37,9 @@ export interface PermissionChangePayload {
     | "user_roles_changed"
     | "role_permissions_changed"
     | "role_status_changed"
-    | "role_deleted";
+    | "role_deleted"
+    | "org_roles_changed"
+    | "org_membership_changed";
   timestamp: number;
 }
 

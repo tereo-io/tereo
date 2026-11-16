@@ -16,7 +16,9 @@ import {
 } from "../../support/principals.js";
 import {
   connect,
+  received,
   signInFor,
+  stillOpen,
   within,
   type TestSocket,
 } from "../../support/socket.js";
@@ -162,6 +164,50 @@ describe("notifyOrgMembershipChanged, notifyOrgRolesChanged and notifyOrgDeactiv
       }
     });
 
+    it("also sends auth:permissions:changed with org_membership_changed", async () => {
+      const user = await createTestUser();
+      const orgId = await ensureTestOrganization(`ws-perm-added-${user.id}`);
+      const socket = connect(await shortLivedToken(user.id, 600));
+      try {
+        expect(await socket.connected).toBeNull();
+        const res = await call("POST", `${orgId}/members`, {
+          userId: user.id,
+          memberRole: "member",
+        });
+        expect(res.status).toBe(201);
+        await received(socket, "auth:permissions:changed");
+        expect(socket.events).toContainEqual({
+          name: "auth:permissions:changed",
+          payload: expect.objectContaining({
+            reason: "org_membership_changed",
+          }),
+        });
+      } finally {
+        socket.close();
+      }
+    });
+
+    it("also sends auth:permissions:changed with org_roles_changed", async () => {
+      const user = await createTestUser();
+      const orgId = testOrgId(`ws-perm-roles-${user.id}`);
+      await ensureTestMembership(user.id, orgId);
+      const socket = connect(await shortLivedToken(user.id, 600, orgId));
+      try {
+        expect(await socket.connected).toBeNull();
+        const res = await call("PUT", `${orgId}/members/${user.id}/roles`, {
+          roleIds: [],
+        });
+        expect(res.status).toBe(200);
+        await received(socket, "auth:permissions:changed");
+        expect(socket.events).toContainEqual({
+          name: "auth:permissions:changed",
+          payload: expect.objectContaining({ reason: "org_roles_changed" }),
+        });
+      } finally {
+        socket.close();
+      }
+    });
+
     it("tells a removed member's sockets outside the organization", async () => {
       const user = await createTestUser();
       const orgId = testOrgId(`ws-left-${user.id}`);
@@ -205,6 +251,10 @@ describe("notifyOrgMembershipChanged, notifyOrgRolesChanged and notifyOrgDeactiv
         expect(await orgChange(elsewhere)).toMatchObject(expected);
         expect(elsewhere.events.map((e) => e.name)).not.toContain(
           "auth:session:revoked"
+        );
+        expect(await stillOpen(elsewhere, 300)).toBe(true);
+        expect(elsewhere.events.map((e) => e.name)).not.toContain(
+          "auth:permissions:changed"
         );
       } finally {
         there.close();

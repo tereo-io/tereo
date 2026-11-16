@@ -1,6 +1,6 @@
+import { emitPermissionChangeToUser, getIO } from "./permissionEmitters.js";
 import type { OrganizationChangePayload } from "../types.js";
 import { userAccountRoom } from "./sessionEmitters.js";
-import { getIO } from "./permissionEmitters.js";
 import { logger } from "../../utils/logger.js";
 import db from "../../utils/db/index.js";
 
@@ -22,7 +22,11 @@ const emitOrgChangeToUsers = (
   );
 };
 
-/** The user joined or left the organization, or their member tier changed. */
+/**
+ * The user joined or left the organization, or their member tier changed.
+ * Membership and org roles shape the user's permissions, so sockets that hear
+ * no account events (`core:events`, `liveEvents`) get the permission signal too.
+ */
 export const notifyOrgMembershipChanged = (
   userId: string,
   organizationId: string
@@ -30,6 +34,10 @@ export const notifyOrgMembershipChanged = (
   emitOrgChangeToUsers([userId], {
     reason: "membership_changed",
     organizationId,
+    timestamp: Date.now(),
+  });
+  emitPermissionChangeToUser(userId, {
+    reason: "org_membership_changed",
     timestamp: Date.now(),
   });
 };
@@ -42,6 +50,10 @@ export const notifyOrgRolesChanged = (
   emitOrgChangeToUsers([userId], {
     reason: "roles_changed",
     organizationId,
+    timestamp: Date.now(),
+  });
+  emitPermissionChangeToUser(userId, {
+    reason: "org_roles_changed",
     timestamp: Date.now(),
   });
 };
