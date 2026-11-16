@@ -1,6 +1,7 @@
 import { decodeJwt, readTokens, writeTokens } from "./tokens.js";
 import { clearSignedIn, markLoggedOut } from "./markers.js";
 import { activeConfig } from "./config.js";
+import { errorLog } from "./logger.js";
 import axios from "axios";
 
 const FORM_HEADERS = { "Content-Type": "application/x-www-form-urlencoded" };
@@ -35,7 +36,7 @@ export const signOut = async (): Promise<void> => {
   // Revoke clears this client's refresh-token cookies; end-session ends the
   // SSO session, whose cookie would otherwise let authorize sign the user
   // straight back in. Each runs even if the other fails.
-  const [, ended] = await Promise.allSettled([
+  const [revoked, ended] = await Promise.allSettled([
     axios.post(
       `${coreUrl}/oauth/revoke`,
       new URLSearchParams({
@@ -52,6 +53,13 @@ export const signOut = async (): Promise<void> => {
         )
       : Promise.reject(new Error("No usable id_token_hint")),
   ]);
+
+  if (revoked.status === "rejected") {
+    errorLog("Token revocation request failed", revoked.reason);
+  }
+  if (ended.status === "rejected" && hint) {
+    errorLog("End-session request failed", ended.reason);
+  }
 
   writeTokens(null);
   clearSignedIn();

@@ -196,6 +196,27 @@ describe("refreshTokens", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("does not adopt another tab's token after sign-out", async () => {
+    setStored(stored("user-1"));
+    const request = vi.fn(
+      async (_name: string, run: () => Promise<unknown>) => {
+        setStored(
+          stored("user-1", {
+            access_token: accessTokenFor("user-1", "other-tab"),
+            expiresAt: Date.now() + 3_600_000,
+          })
+        );
+        markLoggedOut();
+        return run();
+      }
+    );
+    vi.stubGlobal("navigator", { locks: { request } });
+
+    await expect(refreshTokens()).rejects.toThrow("Signed out");
+
+    expect(post).not.toHaveBeenCalled();
+  });
+
   it("fails when sign-out lands while the request is in flight", async () => {
     setStored(stored("user-1"));
     post.mockImplementation(async () => {

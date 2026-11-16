@@ -121,6 +121,29 @@ describe("signOut", () => {
     expect(href).toBe("/ui/signed-out");
   });
 
+  it("logs revoke and end-session failures", async () => {
+    storeTokens(idTokenExpiring(now() + 600));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    post.mockRejectedValue(new Error("down"));
+
+    await signOut();
+
+    const messages = log.mock.calls.map((c) => c[1]);
+    expect(messages).toContain("Token revocation request failed");
+    expect(messages).toContain("End-session request failed");
+    log.mockRestore();
+  });
+
+  it("does not log when there is simply no id token to end the session with", async () => {
+    storeTokens(undefined);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await signOut();
+
+    expect(log).not.toHaveBeenCalled();
+    log.mockRestore();
+  });
+
   it("still revokes when end-session fails, and goes to core's confirmation page", async () => {
     storeTokens(idTokenExpiring(now() + 600));
     post.mockImplementation(async (url) => {

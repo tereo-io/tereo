@@ -75,6 +75,8 @@ const refreshAcrossTabs = (): Promise<StoredTokens> => {
 
   const run = async (): Promise<StoredTokens> => {
     // Another tab may have refreshed while this one waited for the lock.
+    // Signed out in another tab while this one waited for the lock.
+    if (isLoggedOut()) throw new Error("Signed out");
     const stored = readTokens();
     if (
       stored &&
@@ -83,8 +85,6 @@ const refreshAcrossTabs = (): Promise<StoredTokens> => {
     ) {
       return stored;
     }
-    // Or signed out.
-    if (isLoggedOut()) throw new Error("Signed out");
     return requestRefresh();
   };
 
