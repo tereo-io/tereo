@@ -60,7 +60,10 @@ const rejectedWith = (status: number) =>
     status,
   } as never);
 
+const logError = vi.spyOn(console, "error");
+
 beforeEach(() => {
+  logError.mockReset().mockImplementation(() => {});
   localStorage.clear();
   setActiveConfig(config);
   post.mockReset();
@@ -146,6 +149,15 @@ describe("refreshTokens", () => {
 
     expect(readTokens()).toBeNull();
     expect(localStorage.getItem(config.keys.signedIn)).toBeNull();
+  });
+
+  it("logs a failed refresh", async () => {
+    setStored(stored("user-1"));
+    post.mockRejectedValue(rejectedWith(500));
+
+    await expect(refreshTokens()).rejects.toBeDefined();
+
+    expect(logError.mock.calls[0][1]).toBe("Token refresh failed:");
   });
 
   it("keeps the tokens and the marker on other errors", async () => {

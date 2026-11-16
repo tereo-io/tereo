@@ -71,11 +71,28 @@ describe("resolveConfig", () => {
     expect(c.isPublicPath("/callback")).toBe(false);
   });
 
-  it("keeps a given isPublicPath", () => {
-    const isPublicPath = (p: string) => p === "/open";
-    expect(resolveConfig({ ...base, isPublicPath }).isPublicPath).toBe(
-      isPublicPath
-    );
+  it("adds a given isPublicPath to the redirect and signed-out paths", () => {
+    const c = resolveConfig({
+      ...base,
+      basePath: "/base",
+      signedOutPath: "/bye",
+      isPublicPath: (p) => p === "/open",
+    });
+    expect(c.isPublicPath("/open")).toBe(true);
+    expect(c.isPublicPath("/callback")).toBe(true);
+    expect(c.isPublicPath("/bye")).toBe(true);
+    expect(c.isPublicPath("/dashboard")).toBe(false);
+  });
+
+  it("keeps the callback and signed-out paths public when the predicate says no", () => {
+    const c = resolveConfig({
+      ...base,
+      basePath: "/base",
+      signedOutPath: "/bye",
+      isPublicPath: () => false,
+    });
+    expect(c.isPublicPath("/callback")).toBe(true);
+    expect(c.isPublicPath("/bye")).toBe(true);
   });
 });
 

@@ -27,7 +27,7 @@ export interface TereoAuthConfig {
   scopes?: string;
   /** Path the app is served under, without a trailing slash. @default "" */
   basePath?: string;
-  /** Routes that need no session. @default the redirect path and `signedOutPath` */
+  /** Routes that need no session, besides the redirect path and `signedOutPath`, which always are. */
   isPublicPath?: (routePath: string) => boolean;
   /** Where a signed-out visitor lands. Must be public. @default "/" */
   signedOutPath?: string;
@@ -76,10 +76,10 @@ export const resolveConfig = (c: TereoAuthConfig): ResolvedConfig => {
     scopes: c.scopes ?? "openid profile email offline_access",
     basePath,
     signedOutPath,
-    isPublicPath:
-      c.isPublicPath ??
-      ((routePath) =>
-        routePath === redirectPath || routePath === signedOutPath),
+    isPublicPath: (routePath) =>
+      routePath === redirectPath ||
+      routePath === signedOutPath ||
+      (c.isPublicPath?.(routePath) ?? false),
     storagePrefix,
     tokenExpirationBuffer: c.tokenExpirationBuffer ?? 30_000,
     requestTimeoutMs: c.requestTimeoutMs ?? 15_000,

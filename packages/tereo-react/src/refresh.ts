@@ -2,6 +2,7 @@ import { clearSignedIn, isLoggedOut, markLoggedOut } from "./markers.js";
 import { withStorageLock } from "./storageLock.js";
 import axios, { isAxiosError } from "axios";
 import { activeConfig } from "./config.js";
+import { errorLog } from "./logger.js";
 import {
   type StoredTokens,
   decodeJwt,
@@ -74,9 +75,9 @@ const refreshAcrossTabs = (): Promise<StoredTokens> => {
   const staleToken = readTokens()?.access_token;
 
   const run = async (): Promise<StoredTokens> => {
-    // Another tab may have refreshed while this one waited for the lock.
     // Signed out in another tab while this one waited for the lock.
     if (isLoggedOut()) throw new Error("Signed out");
+    // Another tab may have refreshed while this one waited for the lock.
     const stored = readTokens();
     if (
       stored &&
@@ -105,6 +106,7 @@ let inFlight: Promise<StoredTokens> | null = null;
 export const refreshTokens = (): Promise<StoredTokens> => {
   inFlight ??= refreshAcrossTabs()
     .catch((error: unknown) => {
+      errorLog("Token refresh failed:", error);
       if (isRefreshRejected(error)) {
         writeTokens(null);
         clearSignedIn();
