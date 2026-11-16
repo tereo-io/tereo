@@ -246,8 +246,11 @@ describe("TereoAuthProvider live events", () => {
       localStorage.removeItem(TOKENS_KEY);
       window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
     });
+    const invalidate = vi.spyOn(QueryClient.prototype, "invalidateQueries");
     await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(invalidate).not.toHaveBeenCalled();
     expect(loadUser).toHaveBeenCalledTimes(1);
+    invalidate.mockRestore();
   });
 
   it("passes events to the latest onEvent", async () => {

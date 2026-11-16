@@ -18,11 +18,15 @@ Mount `TereoAuthProvider` inside a React Query `QueryClientProvider`.
 
 ```tsx
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { TereoAuthProvider, type TereoUser } from "@tereo-io/react";
+import {
+  TereoAuthProvider,
+  type TereoAuthConfig,
+  type TereoUser,
+} from "@tereo-io/react";
 
 const queryClient = new QueryClient();
 
-const config = {
+const config: TereoAuthConfig = {
   coreUrl: "https://core.example.com",
   clientId: "my-app",
   redirectUri: `${window.location.origin}/callback`,
@@ -113,9 +117,11 @@ export const Callback = () => {
 - The app and core are on the same site.
 - The app's origin is in core's `CORS_ALLOWED_ORIGINS`.
 - The login client's redirect URI is the app's callback, on the app's origin.
-- For live updates without giving the app a core scope, the login client needs `liveEvents`:
-  the admin UI's "Live updates" toggle, `liveEvents` in the admin API, or `"liveEvents": true`
-  in a provisioning document. Otherwise the token needs `core:events` or `core:account`.
+- For live updates, the login client needs `liveEvents`: the admin UI's "Live updates" toggle,
+  `liveEvents` in the admin API, or `"liveEvents": true` in a provisioning document. A service's
+  UI must not request core scopes: any core scope makes the token delegated, and the service's own
+  permissions are then reported as empty (its API answers 403). Core scopes are for apps that call
+  core's own API.
 
 ## Fresh permissions from your own service
 
