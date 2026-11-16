@@ -2,13 +2,13 @@ import { type PermissionRequirement, hasPermission } from "./permissions.js";
 import { type StoredTokens, decodeJwt, readTokens } from "./tokens.js";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { type EventSocket, startTereoEvents } from "./events.js";
+import { type AxiosInstance, isAxiosError } from "axios";
+import { endLocalSession, signOut } from "./signOut.js";
 import { useStoredValue } from "./storage.js";
 import { refreshTokens } from "./refresh.js";
 import { createApiClients } from "./api.js";
-import type { AxiosInstance } from "axios";
 import { hasSession } from "./markers.js";
 import { debugLog } from "./logger.js";
-import { signOut } from "./signOut.js";
 import { io } from "socket.io-client";
 import { signIn } from "./signIn.js";
 import {
@@ -52,6 +52,16 @@ export const AuthContext = createContext<AuthState | null>(null);
 export const ApiContext = createContext<ApiClients | null>(null);
 
 const userKey = (clientId: string) => ["tereo", "user", clientId] as const;
+
+// A user lookup core refused for the token is not retried; other failures
+// (network, 5xx) are, twice, with backoff.
+const retryUserLookup = (failureCount: number, error: unknown): boolean => {
+  const status = isAxiosError(error) ? error.response?.status : undefined;
+  if (status === 401 || status === 403) return false;
+  return failureCount < 2;
+};
+const userLookupDelay = (attempt: number): number =>
+  Math.min(1000 * 2 ** attempt, 30_000);
 
 // Events that arrive together reload the user once.
 const RELOAD_DEBOUNCE_MS = 250;
@@ -103,6 +113,8 @@ export const TereoAuthProvider = ({
     queryKey,
     queryFn: () => loadUser(clients.authed),
     enabled: tokens !== null,
+    retry: retryUserLookup,
+    retryDelay: userLookupDelay,
   });
 
   useEffect(() => {
@@ -200,7 +212,9 @@ export const TereoAuthProvider = ({
           return typeof sid === "string" ? sid : null;
         },
         refresh: refreshTokens,
-        signOut: () => void signOut(),
+        // Core already ended the session: a revoke would fail, and an
+        // end-session without a usable hint asks the user to confirm.
+        signOut: endLocalSession,
         onEvent: handleEvent,
         refused: (reason) => debugLog("Events socket stopped:", reason),
         log: (message, detail) => debugLog(message, detail),

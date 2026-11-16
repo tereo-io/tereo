@@ -24,6 +24,7 @@ export interface TereoEventsDeps {
    * make the new token what `accessToken()` returns before it resolves.
    */
   refresh: () => Promise<unknown>;
+  /** Core revoked this session; it is already over server-side. */
   signOut: () => void;
   /** Every event core sends, including revocations of the user's other sessions. */
   onEvent: (event: TereoEvent) => void;

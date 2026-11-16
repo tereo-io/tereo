@@ -4,6 +4,7 @@ import { type TereoAuthConfig, setActiveConfig } from "../config.js";
 import { StrictMode, type ReactNode } from "react";
 import { TereoAuthProvider } from "../provider.js";
 import { useAuth } from "../hooks.js";
+import axios from "axios";
 import {
   act,
   render as rtlRender,
@@ -20,7 +21,10 @@ const { io, refreshTokens, signOut } = vi.hoisted(() => ({
 }));
 vi.mock("socket.io-client", () => ({ io }));
 vi.mock("../refresh.js", () => ({ refreshTokens }));
-vi.mock("../signOut.js", () => ({ signOut }));
+vi.mock("../signOut.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../signOut.js")>()),
+  signOut,
+}));
 
 class FakeSocket {
   active = false;
@@ -173,23 +177,32 @@ describe("TereoAuthProvider live events", () => {
     expect(loadUser).toHaveBeenCalledTimes(2);
   });
 
-  it("signs out only for its own session's revocation", async () => {
+  it("ends only its own revoked session, locally, with no request", async () => {
     storeTokens();
+    const post = vi.spyOn(axios, "post");
     const onEvent = vi.fn();
-    render(config({ onEvent }));
+    render(config({ onEvent, basePath: "/ui", signedOutPath: "/signed-out" }));
     await waitForSocket();
+
     act(() =>
       socket().emit("auth:session:revoked", {
         sessionId: "other",
         timestamp: 1,
       })
     );
-    expect(signOut).not.toHaveBeenCalled();
+    expect(localStorage.getItem(TOKENS_KEY)).not.toBeNull();
+    expect(window.location.href).toBe("");
+
     act(() =>
       socket().emit("auth:session:revoked", { sessionId: "s1", timestamp: 2 })
     );
-    expect(signOut).toHaveBeenCalledTimes(1);
     expect(onEvent).toHaveBeenCalledTimes(2);
+    expect(localStorage.getItem(TOKENS_KEY)).toBeNull();
+    expect(localStorage.getItem("tereo_app_logged_out")).not.toBeNull();
+    expect(window.location.href).toBe("/ui/signed-out");
+    expect(signOut).not.toHaveBeenCalled();
+    expect(post).not.toHaveBeenCalled();
+    post.mockRestore();
   });
 
   it("keeps one socket across token rotation and closes it on sign-out", async () => {

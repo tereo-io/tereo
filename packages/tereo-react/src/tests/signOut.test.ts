@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig, setActiveConfig } from "../config.js";
 import { isLoggedOut, markSignedIn } from "../markers.js";
+import { endLocalSession, signOut } from "../signOut.js";
 import { readTokens } from "../tokens.js";
-import { signOut } from "../signOut.js";
 import axios from "axios";
 
 vi.mock("axios", () => ({ default: { post: vi.fn() } }));
@@ -189,6 +189,20 @@ describe("signOut", () => {
     expect(urlsCalled()).toContain(
       "https://core.example.com/oauth/end-session"
     );
+    expect(href).toBe("/ui/signed-out");
+  });
+});
+
+describe("endLocalSession", () => {
+  it("clears the session here and goes to the signed-out path, calling no one", () => {
+    storeTokens(idTokenExpiring(now() + 600));
+
+    endLocalSession();
+
+    expect(post).not.toHaveBeenCalled();
+    expect(readTokens()).toBeNull();
+    expect(localStorage.getItem(config.keys.signedIn)).toBeNull();
+    expect(isLoggedOut()).toBe(true);
     expect(href).toBe("/ui/signed-out");
   });
 });

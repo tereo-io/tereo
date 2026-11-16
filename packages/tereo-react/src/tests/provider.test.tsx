@@ -2,6 +2,7 @@ import { useApi, useAuth, useCompleteSignIn, usePublicApi } from "../hooks.js";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type TereoAuthConfig, setActiveConfig } from "../config.js";
+import { AxiosError, type AxiosResponse } from "axios";
 import { StrictMode, type ReactNode } from "react";
 import { TereoAuthProvider } from "../provider.js";
 import {
@@ -22,6 +23,11 @@ vi.mock("../refresh.js", () => ({ refreshTokens }));
 
 const TOKENS_KEY = "tereo_app_tokens";
 const loadUser = vi.fn();
+
+const httpError = (status: number) =>
+  new AxiosError("failed", undefined, undefined, undefined, {
+    status,
+  } as AxiosResponse);
 
 const baseConfig = (over: Partial<TereoAuthConfig> = {}): TereoAuthConfig => ({
   coreUrl: "https://core.example.com",
@@ -84,7 +90,10 @@ beforeEach(() => {
   at("/ui/dashboard");
 });
 
-afterEach(() => setActiveConfig(null));
+afterEach(() => {
+  setActiveConfig(null);
+  vi.useRealTimers();
+});
 
 describe("TereoAuthProvider", () => {
   it("loads the user with the authed clients once tokens exist", async () => {
@@ -103,6 +112,53 @@ describe("TereoAuthProvider", () => {
     expect(Object.keys(clients)).toEqual(["main"]);
     expect(clients.main.defaults.baseURL).toBe("https://api.example.com");
   });
+
+  it("retries a failed user lookup with backoff", async () => {
+    vi.useFakeTimers();
+    storeTokens();
+    loadUser
+      .mockRejectedValueOnce(httpError(500))
+      .mockResolvedValue({ permissions: [], name: "Ada" });
+
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: wrapperFor(baseConfig()),
+    });
+
+    await act(() => vi.advanceTimersByTimeAsync(999));
+    expect(loadUser).toHaveBeenCalledTimes(1);
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(loadUser).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(10));
+    expect(result.current.user).toMatchObject({ name: "Ada" });
+  });
+
+  it("gives up on the user lookup after two retries", async () => {
+    vi.useFakeTimers();
+    storeTokens();
+    loadUser.mockRejectedValue(httpError(503));
+
+    renderHook(() => useAuth(), { wrapper: wrapperFor(baseConfig()) });
+
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(loadUser).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([401, 403])(
+    "does not retry a user lookup core answered with %i",
+    async (status) => {
+      vi.useFakeTimers();
+      storeTokens();
+      loadUser.mockRejectedValue(httpError(status));
+
+      const { result } = renderHook(() => useAuth(), {
+        wrapper: wrapperFor(baseConfig()),
+      });
+
+      await act(() => vi.advanceTimersByTimeAsync(60_000));
+      expect(loadUser).toHaveBeenCalledTimes(1);
+      expect(result.current.user).toBeNull();
+    }
+  );
 
   it("does not load the user without tokens", () => {
     const { result } = renderHook(() => useAuth(), {

@@ -88,6 +88,10 @@ const Toolbar = () => {
 `admin` includes all). `signIn`, `signOut` and `completeSignIn` are also exported as plain
 functions.
 
+The user lookup is retried twice, with backoff, unless `loadUser` fails with a 401 or 403. When
+core revokes this tab's own session, the provider clears it locally and goes to `signedOutPath`,
+sending nothing to core, where the session is already over.
+
 ## Callback page
 
 `useCompleteSignIn().complete(search)` finishes sign-in on the redirect route. The exchange runs

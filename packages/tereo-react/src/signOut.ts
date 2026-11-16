@@ -71,3 +71,15 @@ export const signOut = async (): Promise<void> => {
       ? `${basePath}${signedOutPath}`
       : `${coreUrl}/oauth/end-session?${new URLSearchParams({ client_id: clientId })}`;
 };
+
+/**
+ * Ends the session in this browser only, for one core has already ended.
+ * The logged-out marker keeps the dead refresh cookie from being tried.
+ */
+export const endLocalSession = (): void => {
+  const { signedOutPath, basePath } = activeConfig();
+  markLoggedOut();
+  writeTokens(null);
+  clearSignedIn();
+  window.location.href = `${basePath}${signedOutPath}`;
+};
