@@ -26,7 +26,9 @@ const REDIRECT_URI = "http://localhost:3000/live-events-callback";
 type Client = Awaited<ReturnType<typeof createTestClient>>;
 
 let live: Client;
+let account: Client;
 const signInLive = signInFor(() => live, REDIRECT_URI);
+const signInAccount = signInFor(() => account, REDIRECT_URI);
 
 const setLiveEvents = (client: Client, liveEvents: boolean) =>
   prisma.oAuthClient.update({ where: { id: client.id }, data: { liveEvents } });
@@ -48,6 +50,7 @@ const replaceRoles = async (userId: string) => {
 beforeAll(async () => {
   live = await createTestClient({ redirectUris: [REDIRECT_URI] });
   await setLiveEvents(live, true);
+  account = await createTestClient({ redirectUris: [REDIRECT_URI] });
 });
 
 describe("a liveEvents client's token without core scopes", () => {
@@ -118,10 +121,13 @@ describe("a liveEvents client's token without core scopes", () => {
       REDIRECT_URI
     )("openid");
     const socket = connect(accessToken);
-    expect(await socket.connected).toBe(
-      "This token is not issued for core's API"
-    );
-    socket.close();
+    try {
+      expect(await socket.connected).toBe(
+        "This token is not issued for core's API"
+      );
+    } finally {
+      socket.close();
+    }
   });
 
   it("is refused at new handshakes once liveEvents is turned off", async () => {
@@ -132,22 +138,34 @@ describe("a liveEvents client's token without core scopes", () => {
       REDIRECT_URI
     )("openid");
     const first = connect(accessToken);
-    expect(await first.connected).toBeNull();
-    first.close();
+    try {
+      expect(await first.connected).toBeNull();
+    } finally {
+      first.close();
+    }
 
     await setLiveEvents(client, false);
     const second = connect(accessToken);
-    expect(await second.connected).toBe(
-      "This token is not issued for core's API"
-    );
-    second.close();
+    try {
+      expect(await second.connected).toBe(
+        "This token is not issued for core's API"
+      );
+    } finally {
+      second.close();
+    }
   });
 
   it("does not put the socket in the account room", async () => {
     const { user, accessToken } = await signInLive("openid");
+    const { accessToken: accountToken } = await signInAccount(
+      "openid core:account",
+      user
+    );
     const socket = connect(accessToken);
+    const control = connect(accountToken);
     try {
       expect(await socket.connected).toBeNull();
+      expect(await control.connected).toBeNull();
       const orgId = await ensureTestOrganization(`live-events-${user.id}`);
       const added = await fetch(
         `${BASE_URL}/v1/admin/organizations/${orgId}/members`,
@@ -163,12 +181,14 @@ describe("a liveEvents client's token without core scopes", () => {
         }
       );
       expect(added.status).toBe(HTTP_STATUS.CREATED);
+      await received(control, "auth:organization:changed");
       expect(await stillOpen(socket, 800)).toBe(true);
       expect(socket.events.map((e) => e.name)).not.toContain(
         "auth:organization:changed"
       );
     } finally {
       socket.close();
+      control.close();
     }
   });
 });

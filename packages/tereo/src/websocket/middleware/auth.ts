@@ -39,7 +39,6 @@ export const authenticateSocket = async (
     if (check.isClientToken) {
       return next(new Error("Invalid token subject"));
     }
-    // The socket carries the user's own account events.
     if (!admitsLiveEvents(check.access, check.token.client)) {
       return next(new Error("This token is not issued for core's API"));
     }
