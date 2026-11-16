@@ -1,6 +1,6 @@
 {
   "name": "@tereo-io/react",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "Sign a React app in through Tereo: OAuth with PKCE, a session shared by tabs, token-renewing API clients, permission checks and live updates",
   "keywords": [

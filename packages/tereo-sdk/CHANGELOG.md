@@ -1,3 +1,13 @@
+## 0.5.3 (2026-11-16)
+
+### 🚀 Features
+
+- Provisioning documents' login clients take `liveEvents` (default `false`): users signed in through the client may open core's socket for live permission and session signals without asking for `core:events`. ([#62](https://github.com/tereo-io/tereo/pull/62))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.5.2 (2026-11-13)
 
 ### 🚀 Features

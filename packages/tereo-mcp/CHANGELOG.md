@@ -1,3 +1,9 @@
+## 0.1.2 (2026-11-16)
+
+### 🧱 Updated Dependencies
+
+- Updated @tereo-io/sdk to 0.5.3
+
 ## 0.1.1 (2026-11-13)
 
 ### 🚀 Features
