@@ -189,7 +189,7 @@ describe("refreshTokens", () => {
 
     await expect(refreshTokens()).resolves.toEqual(fresh);
 
-    expect(request.mock.calls[0][0]).toBe("tereo_refresh_app");
+    expect(request.mock.calls[0][0]).toBe("tereo_app_refresh");
     expect(post).not.toHaveBeenCalled();
   });
 
@@ -253,7 +253,7 @@ describe("refreshTokens", () => {
     vi.stubGlobal("navigator", {});
     await refreshTokens();
     expect(post).toHaveBeenCalledTimes(1);
-    expect(localStorage.getItem("tereo_refresh_app")).toBeNull();
+    expect(localStorage.getItem("tereo_app_refresh")).toBeNull();
   });
 });
 

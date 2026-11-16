@@ -214,7 +214,7 @@ export const TereoAuthProvider = ({
         refresh: refreshTokens,
         // Core already ended the session: a revoke would fail, and an
         // end-session without a usable hint asks the user to confirm.
-        signOut: endLocalSession,
+        sessionEnded: endLocalSession,
         onEvent: handleEvent,
         refused: (reason) => debugLog("Events socket stopped:", reason),
         log: (message, detail) => debugLog(message, detail),

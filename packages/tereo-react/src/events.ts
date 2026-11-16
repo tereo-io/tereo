@@ -25,7 +25,7 @@ export interface TereoEventsDeps {
    */
   refresh: () => Promise<unknown>;
   /** Core revoked this session; it is already over server-side. */
-  signOut: () => void;
+  sessionEnded: () => void;
   /** Every event core sends, including revocations of the user's other sessions. */
   onEvent: (event: TereoEvent) => void;
   /**
@@ -78,7 +78,7 @@ export const startTereoEvents = (deps: TereoEventsDeps): (() => void) => {
   const signOut = () => {
     if (signedOut) return;
     signedOut = true;
-    deps.signOut();
+    deps.sessionEnded();
   };
 
   const refresh = async (): Promise<boolean> => {

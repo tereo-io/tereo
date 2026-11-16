@@ -58,7 +58,7 @@ const setup = (
           fresh = true;
         })
     ),
-    signOut: vi.fn(),
+    sessionEnded: vi.fn(),
     onEvent: vi.fn(),
     refused: vi.fn(),
     schedule: (fn: () => void, ms: number) => {
@@ -123,10 +123,10 @@ describe("startTereoEvents", () => {
     const t = setup();
     await flush();
     t.socket().emit("auth:session:revoked", { sessionId: "sid-other" });
-    expect(t.deps.signOut).not.toHaveBeenCalled();
+    expect(t.deps.sessionEnded).not.toHaveBeenCalled();
     t.socket().emit("auth:session:revoked", { sessionId: "sid-1" });
     t.socket().emit("auth:session:revoked", { sessionId: "sid-1" });
-    expect(t.deps.signOut).toHaveBeenCalledTimes(1);
+    expect(t.deps.sessionEnded).toHaveBeenCalledTimes(1);
   });
 
   it("reconnects with a fresh token after tereo closes the socket", async () => {
@@ -209,7 +209,7 @@ describe("startTereoEvents", () => {
     await flush();
     expect(t.deps.refresh).toHaveBeenCalledTimes(1);
     expect(t.deps.refused).toHaveBeenCalledWith(reason);
-    expect(t.deps.signOut).not.toHaveBeenCalled();
+    expect(t.deps.sessionEnded).not.toHaveBeenCalled();
     expect(t.socket().connects).toBe(2);
     expect(t.scheduled).toEqual([]);
   });

@@ -70,8 +70,8 @@ const requestRefresh = async (): Promise<StoredTokens> => {
 };
 
 const refreshAcrossTabs = (): Promise<StoredTokens> => {
-  const { clientId, tokenExpirationBuffer } = activeConfig();
-  const lockName = `tereo_refresh_${clientId}`;
+  const { storagePrefix, tokenExpirationBuffer } = activeConfig();
+  const lockName = `${storagePrefix}_refresh`;
   const staleToken = readTokens()?.access_token;
 
   const run = async (): Promise<StoredTokens> => {
