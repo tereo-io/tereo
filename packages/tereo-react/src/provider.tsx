@@ -145,18 +145,18 @@ export const TereoAuthProvider = ({
   const [isLive, setIsLive] = useState(false);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(
-    () => () => {
-      if (reloadTimer.current) clearTimeout(reloadTimer.current);
-    },
-    []
-  );
+  // `config` is resolved once, but a callback written inline should see
+  // the state of the latest render.
+  const onEventRef = useRef(config.onEvent);
+  useEffect(() => {
+    onEventRef.current = config.onEvent;
+  }, [config.onEvent]);
 
   useEffect(() => {
     if (!resolved.live || !userId) return;
 
     const handleEvent = (event: TereoEvent) => {
-      resolved.onEvent?.(event);
+      onEventRef.current?.(event);
       if (event.type === "session-revoked") return;
       if (reloadTimer.current) clearTimeout(reloadTimer.current);
       reloadTimer.current = setTimeout(() => {
@@ -209,6 +209,8 @@ export const TereoAuthProvider = ({
 
     return () => {
       cancelled = true;
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = null;
       stop?.();
       setIsLive(false);
     };

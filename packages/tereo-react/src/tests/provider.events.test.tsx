@@ -1,10 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type TereoAuthConfig, setActiveConfig } from "../config.js";
-import { act, renderHook, waitFor } from "@testing-library/react";
 import { StrictMode, type ReactNode } from "react";
 import { TereoAuthProvider } from "../provider.js";
 import { useAuth } from "../hooks.js";
+import {
+  act,
+  render as rtlRender,
+  renderHook,
+  waitFor,
+} from "@testing-library/react";
 
 type Listener = (...args: unknown[]) => void;
 
@@ -201,6 +206,70 @@ describe("TereoAuthProvider live events", () => {
       window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
     });
     await waitFor(() => expect(socket().disconnect).toHaveBeenCalled());
+  });
+
+  it("disconnects the socket when the provider unmounts", async () => {
+    storeTokens();
+    const { unmount } = render(config());
+    await waitForSocket();
+    unmount();
+    expect(socket().disconnect).toHaveBeenCalled();
+  });
+
+  it("closes the first user's socket and opens a second when the user changes", async () => {
+    storeTokens({ sub: "u1", sid: "s1" });
+    render(config());
+    await waitForSocket();
+    const first = socket();
+    act(() => {
+      storeTokens({ sub: "u2", sid: "s2" });
+      window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
+    });
+    await waitFor(() => expect(io).toHaveBeenCalledTimes(2));
+    expect(first.disconnect).toHaveBeenCalled();
+    expect(socket()).not.toBe(first);
+  });
+
+  it("does not reload the user after sign-out for an event just before it", async () => {
+    storeTokens();
+    const { result } = render(config());
+    await waitFor(() => expect(result.current.user).not.toBeNull());
+    await waitForSocket();
+    expect(loadUser).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    act(() =>
+      socket().emit("auth:permissions:changed", { reason: "r", timestamp: 1 })
+    );
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    act(() => {
+      localStorage.removeItem(TOKENS_KEY);
+      window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(500));
+    expect(loadUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes events to the latest onEvent", async () => {
+    storeTokens();
+    const first = vi.fn();
+    const second = vi.fn();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const tree = (c: TereoAuthConfig) => (
+      <QueryClientProvider client={client}>
+        <TereoAuthProvider config={c}>{null}</TereoAuthProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = rtlRender(tree(config({ onEvent: first })));
+    await waitForSocket();
+    rerender(tree(config({ onEvent: second })));
+    act(() =>
+      socket().emit("auth:permissions:changed", { reason: "r", timestamp: 1 })
+    );
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledTimes(1);
   });
 
   it("keeps reloadUser's identity across renders", async () => {

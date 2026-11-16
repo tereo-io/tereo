@@ -168,6 +168,20 @@ describe("startTereoEvents", () => {
     expect(t.deps.refresh).not.toHaveBeenCalled();
   });
 
+  it("caps the backoff at 60 seconds", async () => {
+    const t = setup();
+    await flush();
+    for (let i = 0; i < 8; i++) {
+      t.socket().active = false;
+      t.socket().emit("connect_error", new Error("Too many connections"));
+      t.scheduled[i].fn();
+      await flush();
+    }
+    expect(t.scheduled.map((s) => s.ms)).toEqual([
+      1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000,
+    ]);
+  });
+
   it("answers a token refusal with one refresh, then reconnects with the new token", async () => {
     const t = setup();
     await flush();
