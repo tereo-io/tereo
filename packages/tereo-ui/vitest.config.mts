@@ -9,6 +9,10 @@ export default defineConfig({
   resolve: {
     alias: [
       { find: "@", replacement: path.resolve(__dirname, "./src") },
+      {
+        find: /^@tereo-io\/react$/,
+        replacement: path.resolve(__dirname, "../tereo-react/src/index.ts"),
+      },
       // This package keeps its own React beside a newer one at the workspace
       // root, which Testing Library and react-query resolve; tests need one.
       ...["react", "react-dom"].map((name) => ({

@@ -1,10 +1,9 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
-import { AuthProvider, AxiosProvider } from "@/lib/auth";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 import { ToastContainer } from "react-toastify";
+import { CoreAuthProvider } from "@/lib/auth";
 import type { ReactNode } from "react";
-import env from "@/lib/env";
 import "./toasts.css";
 
 const queryClient = new QueryClient({
@@ -36,22 +35,13 @@ interface AppProviderProps {
 export const AppProvider = ({ children }: AppProviderProps) => {
   return (
     <QueryClientProvider client={queryClient}>
-      <AxiosProvider
-        services={{
-          auth: env.CORE_URL,
-          fileService: `${env.CORE_URL}/v1/files`,
-          webhooks: `${env.CORE_URL}/v1/webhooks`,
-          audit: `${env.CORE_URL}/v1/audit`,
-        }}
-      >
-        <AuthProvider>
-          <ThemeProvider>
-            {children}
-            <ThemedToastContainer />
-          </ThemeProvider>
-        </AuthProvider>
-        <ReactQueryDevtools initialIsOpen={false} />
-      </AxiosProvider>
+      <CoreAuthProvider>
+        <ThemeProvider>
+          {children}
+          <ThemedToastContainer />
+        </ThemeProvider>
+      </CoreAuthProvider>
+      <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   );
 };

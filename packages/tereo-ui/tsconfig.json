@@ -14,7 +14,8 @@
     "experimentalDecorators": false,
     "types": ["vite/client"],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@tereo-io/react": ["../tereo-react/src/index.ts"]
     }
   },
   "include": ["src/**/*"],

@@ -1,9 +1,8 @@
 import { Alert, Centered, Col, Spinner } from "@kosmeo-ui/react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { clearPKCE, takePostLoginPath } from "@/lib/auth/pkce";
 import { oauthErrorMessage } from "../api/oauthErrorMessage";
 import { BrandedAuthPage } from "@/features/auth/branding";
-import useExchangeToken from "@/lib/auth/useExchangeToken";
+import { useCompleteSignIn } from "@tereo-io/react";
 import { useEffect, useRef, useState } from "react";
 import { BackToSignIn } from "./BackToSignIn";
 
@@ -13,34 +12,26 @@ export const AuthCallback = () => {
   const [error, setError] = useState<string | null>(null);
   const hasExchanged = useRef(false);
 
-  const { mutateAsync } = useExchangeToken();
+  const { complete } = useCompleteSignIn();
 
   useEffect(() => {
-    // The code is single-use: StrictMode's second run must not resend it.
+    // StrictMode runs this effect twice; the result is handled once.
     if (hasExchanged.current) return;
     hasExchanged.current = true;
 
-    const code = searchParams.get("code");
-    const state = searchParams.get("state");
-    const errorParam = searchParams.get("error");
-
-    if (errorParam) {
-      clearPKCE();
-      takePostLoginPath();
-      setError(searchParams.get("error_description") || errorParam);
-      return;
-    }
-    if (!code || !state) {
-      setError("Missing authorization code or state parameter");
-      return;
-    }
-
-    mutateAsync({ code, state })
-      .then(() => navigate(takePostLoginPath() ?? "/", { replace: true }))
-      .catch((err: unknown) =>
-        setError(oauthErrorMessage(err, "Token exchange failed"))
-      );
-  }, [searchParams, mutateAsync, navigate]);
+    complete(searchParams)
+      .then(({ returnTo }) => navigate(returnTo ?? "/", { replace: true }))
+      .catch((err: unknown) => {
+        const errorParam = searchParams.get("error");
+        if (errorParam) {
+          setError(searchParams.get("error_description") || errorParam);
+        } else if (!searchParams.get("code") || !searchParams.get("state")) {
+          setError("Missing authorization code or state parameter");
+        } else {
+          setError(oauthErrorMessage(err, "Token exchange failed"));
+        }
+      });
+  }, [searchParams, complete, navigate]);
 
   if (error) {
     return (
