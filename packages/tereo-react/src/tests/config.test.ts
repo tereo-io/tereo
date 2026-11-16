@@ -61,6 +61,16 @@ describe("resolveConfig", () => {
     expect(c.isPublicPath("/dashboard")).toBe(false);
   });
 
+  it("strips the base path only at a segment boundary", () => {
+    const c = resolveConfig({
+      ...base,
+      basePath: "/app",
+      redirectUri: "https://app.example.com/application/callback",
+    });
+    expect(c.isPublicPath("/application/callback")).toBe(true);
+    expect(c.isPublicPath("/callback")).toBe(false);
+  });
+
   it("keeps a given isPublicPath", () => {
     const isPublicPath = (p: string) => p === "/open";
     expect(resolveConfig({ ...base, isPublicPath }).isPublicPath).toBe(

@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 
 const listeners = new Map<string, Set<() => void>>();
 
@@ -62,8 +62,12 @@ export const subscribeKey = (key: string, fn: () => void): (() => void) => {
 // useSyncExternalStore compares snapshots by identity, so the raw string is the
 // snapshot and the parse happens after it.
 export const useStoredValue = <T>(key: string): T | null => {
+  const subscribe = useCallback(
+    (fn: () => void) => subscribeKey(key, fn),
+    [key]
+  );
   const raw = useSyncExternalStore(
-    (fn) => subscribeKey(key, fn),
+    subscribe,
     () => readRaw(key),
     () => null
   );
