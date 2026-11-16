@@ -122,8 +122,10 @@ export const Callback = () => {
 - The app's origin is in core's `CORS_ALLOWED_ORIGINS`.
 - The login client's redirect URI is the app's callback, on the app's origin.
 - For live updates, the login client needs `liveEvents`: the admin UI's "Live updates" toggle,
-  `liveEvents` in the admin API, or `"liveEvents": true` in a provisioning document. A service's
-  UI must not request core scopes: any core scope makes the token delegated, and the service's own
+  `liveEvents` in the admin API, or `"liveEvents": true` in a provisioning document. Without it,
+  set `live: false`: core refuses the socket ("This token is not issued for core's API") and the
+  provider gives up on live updates for that sign-in. Either way, a service's UI must not request
+  core scopes to get them: any core scope makes the token delegated, and the service's own
   permissions are then reported as empty (its API answers 403). Core scopes are for apps that call
   core's own API.
 

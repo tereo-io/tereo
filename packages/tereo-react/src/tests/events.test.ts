@@ -1,3 +1,4 @@
+import { AxiosError, type AxiosResponse } from "axios";
 import { describe, expect, it, vi } from "vitest";
 import type { TereoEvent } from "../config.js";
 import {
@@ -38,6 +39,15 @@ class FakeSocket implements EventSocket {
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
+
+const httpError = (status?: number) =>
+  new AxiosError(
+    "failed",
+    status ? undefined : "ECONNABORTED",
+    undefined,
+    undefined,
+    status ? ({ status } as AxiosResponse) : undefined
+  );
 
 const setup = (
   overrides: { fresh?: boolean; refresh?: () => Promise<unknown> } = {}
@@ -143,7 +153,7 @@ describe("startTereoEvents", () => {
   it("does not reconnect when the refresh is refused", async () => {
     const t = setup({
       refresh: async () => {
-        throw new Error("invalid_grant");
+        throw httpError(400);
       },
     });
     await flush();
@@ -151,7 +161,76 @@ describe("startTereoEvents", () => {
     t.socket().emit("disconnect", "io server disconnect");
     await flush();
     expect(t.socket().connects).toBe(1);
+    expect(t.scheduled).toEqual([]);
   });
+
+  it.each([
+    ["a timeout", httpError()],
+    ["a 503", httpError(503)],
+  ])(
+    "retries the connection later when the refresh fails with %s",
+    async (_, error) => {
+      let fail = true;
+      const t = setup({
+        fresh: false,
+        refresh: async () => {
+          if (fail) throw error;
+        },
+      });
+      await flush();
+      expect(t.socket().connects).toBe(0);
+      expect(t.scheduled.map((s) => s.ms)).toEqual([1000]);
+
+      fail = false;
+      t.scheduled[0].fn();
+      await flush();
+      expect(t.deps.refresh).toHaveBeenCalledTimes(2);
+      expect(t.socket().connects).toBe(1);
+    }
+  );
+
+  it("retries after a token refusal whose refresh failed in transit, and refreshes again", async () => {
+    let fail = true;
+    const t = setup({
+      refresh: async () => {
+        if (fail) throw httpError();
+      },
+    });
+    await flush();
+    const reason = "Invalid or expired access token";
+    t.socket().active = false;
+    t.socket().emit("connect_error", new Error(reason));
+    await flush();
+    expect(t.socket().connects).toBe(1);
+    expect(t.scheduled.map((s) => s.ms)).toEqual([1000]);
+
+    t.scheduled[0].fn();
+    await flush();
+    expect(t.socket().connects).toBe(2);
+    fail = false;
+    t.socket().active = false;
+    t.socket().emit("connect_error", new Error(reason));
+    await flush();
+    expect(t.deps.refresh).toHaveBeenCalledTimes(2);
+    expect(t.deps.refused).not.toHaveBeenCalled();
+    expect(t.socket().connects).toBe(3);
+  });
+
+  it.each(["This token is not issued for core's API", "Invalid token subject"])(
+    "stops at once, with no refresh, when core refuses: %s",
+    async (reason) => {
+      const t = setup();
+      await flush();
+      t.socket().active = false;
+      t.socket().emit("connect_error", new Error(reason));
+      await flush();
+      expect(t.deps.refresh).not.toHaveBeenCalled();
+      expect(t.deps.refused).toHaveBeenCalledWith(reason);
+      expect(t.deps.sessionEnded).not.toHaveBeenCalled();
+      expect(t.socket().connects).toBe(1);
+      expect(t.scheduled).toEqual([]);
+    }
+  );
 
   it("retries a transient refusal with backoff", async () => {
     const t = setup();
@@ -200,7 +279,7 @@ describe("startTereoEvents", () => {
   it("stops after a second token refusal and reports it, without signing out", async () => {
     const t = setup();
     await flush();
-    const reason = "This token is not issued for core's API";
+    const reason = "Invalid or expired access token";
     t.socket().active = false;
     t.socket().emit("connect_error", new Error(reason));
     await flush();

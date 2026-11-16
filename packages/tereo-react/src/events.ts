@@ -1,3 +1,4 @@
+import { isRefreshRejected } from "./refresh.js";
 import type { TereoEvent } from "./config.js";
 
 /** The slice of a socket.io client socket the live-updates loop uses. */
@@ -29,9 +30,9 @@ export interface TereoEventsDeps {
   /** Every event core sends, including revocations of the user's other sessions. */
   onEvent: (event: TereoEvent) => void;
   /**
-   * Core refused the handshake again after a token refresh: this session's
-   * token is never admitted (e.g. granted before `core:events`), so the loop
-   * stops until the user signs in again.
+   * Core will not admit this session's token: the login client lacks
+   * `liveEvents`, or core refused the handshake again after a refresh. The
+   * loop stops until the user signs in again.
    */
   refused?: (reason: string) => void;
   /** Defaults to setTimeout; returns a cancel function. */
@@ -44,6 +45,13 @@ export interface TereoEventsDeps {
 const TRANSIENT_REFUSALS = new Set([
   "Too many connections",
   "Server is shutting down",
+]);
+
+// Refusals no new token can change: the login client is not admitted to
+// live events, or the token is a client's own.
+const FINAL_REFUSALS = new Set([
+  "This token is not issued for core's API",
+  "Invalid token subject",
 ]);
 
 const RETRY_MIN_MS = 1_000;
@@ -81,19 +89,25 @@ export const startTereoEvents = (deps: TereoEventsDeps): (() => void) => {
     deps.sessionEnded();
   };
 
-  const refresh = async (): Promise<boolean> => {
+  // "transient" when core did not answer the refresh (offline, timeout,
+  // 5xx); a refusal clears the token, which signs the user out.
+  const refresh = async (): Promise<"ok" | "rejected" | "transient"> => {
     try {
       await deps.refresh();
-      return true;
+      return "ok";
     } catch (error) {
       log("Token refresh for the events socket failed", error);
-      return false;
+      return isRefreshRejected(error) ? "rejected" : "transient";
     }
   };
 
   const connectFresh = async () => {
     if (stopped || !deps.accessToken()) return;
-    if (!deps.tokenIsFresh() && !(await refresh())) return;
+    if (!deps.tokenIsFresh()) {
+      const outcome = await refresh();
+      if (outcome === "transient") retryLater();
+      if (outcome !== "ok") return;
+    }
     if (!stopped && deps.accessToken()) socket.connect();
   };
 
@@ -123,14 +137,19 @@ export const startTereoEvents = (deps: TereoEventsDeps): (() => void) => {
       retryLater();
       return;
     }
-    if (refreshedForRefusal) {
+    if (FINAL_REFUSALS.has(error.message) || refreshedForRefusal) {
       deps.refused?.(error.message);
       return;
     }
     refreshedForRefusal = true;
-    // A refused refresh clears the token, which signs the user out.
-    void refresh().then((ok) => {
-      if (ok && !stopped && deps.accessToken()) socket.connect();
+    void refresh().then((outcome) => {
+      if (outcome === "transient") {
+        // No new token yet: the next refusal still earns a refresh.
+        refreshedForRefusal = false;
+        retryLater();
+      } else if (outcome === "ok" && !stopped && deps.accessToken()) {
+        socket.connect();
+      }
     });
   });
   socket.on(
