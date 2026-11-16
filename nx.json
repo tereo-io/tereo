@@ -52,6 +52,13 @@
           "pattern": "{projectName}@{version}"
         }
       },
+      "react": {
+        "projects": ["@tereo-io/react"],
+        "projectsRelationship": "independent",
+        "releaseTag": {
+          "pattern": "{projectName}@{version}"
+        }
+      },
       "core": {
         "projects": ["tereo", "tereo-ui"],
         "projectsRelationship": "fixed",
