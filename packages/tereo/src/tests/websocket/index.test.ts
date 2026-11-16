@@ -529,9 +529,16 @@ describe("initializeWebSocket", () => {
         ]) {
           await received(full, name);
         }
-        expect(socket.events.map((e) => e.name)).toEqual([
-          "auth:permissions:changed",
-        ]);
+        // Membership shapes permissions, so its change is the second one heard.
+        await vi.waitFor(() =>
+          expect(socket.events.map((e) => e.name)).toEqual([
+            "auth:permissions:changed",
+            "auth:permissions:changed",
+          ])
+        );
+        expect(socket.events[1].payload).toMatchObject({
+          reason: "org_membership_changed",
+        });
 
         const me = await fetch(`${BASE_URL}/v1/account/me`, {
           headers: { Authorization: `Bearer ${accessToken}` },

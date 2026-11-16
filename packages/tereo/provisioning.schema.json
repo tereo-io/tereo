@@ -376,6 +376,10 @@
               "minLength": 1
             }
           },
+          "liveEvents": {
+            "default": false,
+            "type": "boolean"
+          },
           "description": {
             "type": "string",
             "maxLength": 500
