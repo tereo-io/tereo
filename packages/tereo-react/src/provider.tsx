@@ -51,7 +51,14 @@ export interface ApiClients {
 export const AuthContext = createContext<AuthState | null>(null);
 export const ApiContext = createContext<ApiClients | null>(null);
 
-const userKey = (clientId: string) => ["tereo", "user", clientId] as const;
+// Every user cached for this client; one identity's entry is that prefix
+// plus its subject and organization.
+const usersKey = (clientId: string) => ["tereo", "user", clientId] as const;
+
+const claimOf = (token: string | undefined, claim: string): string | null => {
+  const value = token ? decodeJwt(token)?.[claim] : null;
+  return typeof value === "string" ? value : null;
+};
 
 // A user lookup core refused for the token is not retried; other failures
 // (network, 5xx) are, twice, with backoff.
@@ -92,7 +99,16 @@ export const TereoAuthProvider = ({
   const queryClient = useQueryClient();
   const clients = useMemo(() => createApiClients(apis), [apis]);
   const tokens = useStoredValue<StoredTokens>(keys.tokens);
-  const queryKey = useMemo(() => userKey(clientId), [clientId]);
+  const accessToken = tokens?.access_token;
+  // Keyed on whose token it is, so a sign-in as someone else or into
+  // another organization (here or in another tab) never reads the previous
+  // identity's user.
+  const userId = useMemo(() => claimOf(accessToken, "sub"), [accessToken]);
+  const orgId = useMemo(() => claimOf(accessToken, "org_id"), [accessToken]);
+  const queryKey = useMemo(
+    () => [...usersKey(clientId), userId, orgId] as const,
+    [clientId, userId, orgId]
+  );
 
   // A page load with a session but no token (the access token lives in
   // storage the tab may not have): renew it before deciding anything.
@@ -120,8 +136,8 @@ export const TereoAuthProvider = ({
   useEffect(() => {
     // Signed out here or in another tab: drop the cached user rather than
     // render it until the redirect lands.
-    if (!tokens) queryClient.removeQueries({ queryKey });
-  }, [tokens, queryClient, queryKey]);
+    if (!tokens) queryClient.removeQueries({ queryKey: usersKey(clientId) });
+  }, [tokens, queryClient, clientId]);
 
   useEffect(() => {
     if (tokens || restoring || hasSession()) return;
@@ -145,17 +161,27 @@ export const TereoAuthProvider = ({
     [queryClient, queryKey]
   );
 
-  // Keyed on the user, not the token: the token (and its sid) rotates on
-  // every refresh, and the events loop reads the current one at each
-  // handshake.
-  const accessToken = tokens?.access_token;
-  const userId = useMemo(() => {
-    const sub = accessToken ? decodeJwt(accessToken)?.sub : null;
-    return typeof sub === "string" ? sub : null;
-  }, [accessToken]);
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // A new token (exchange, refresh, another tab) may carry other
+  // permissions. A new identity changes the key, which loads on its own;
+  // the same one is reloaded now, which also covers any pending event
+  // reload.
+  const lastToken = useRef(accessToken);
+  const lastKey = useRef(queryKey);
+  useEffect(() => {
+    const previousToken = lastToken.current;
+    const previousKey = lastKey.current;
+    lastToken.current = accessToken;
+    lastKey.current = queryKey;
+    if (!previousToken || !accessToken || previousToken === accessToken) return;
+    if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    reloadTimer.current = null;
+    if (previousKey === queryKey)
+      void queryClient.invalidateQueries({ queryKey });
+  }, [accessToken, queryKey, queryClient]);
 
   const [isLive, setIsLive] = useState(false);
-  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // `config` is resolved once, but a callback written inline should see
   // the state of the latest render.
@@ -164,6 +190,9 @@ export const TereoAuthProvider = ({
     onEventRef.current = config.onEvent;
   }, [config.onEvent]);
 
+  // The events loop is keyed on the user, not the token: the token (and
+  // its sid) rotates on every refresh, and the loop reads the current one
+  // at each handshake.
   useEffect(() => {
     if (!resolved.live || !userId) return;
 

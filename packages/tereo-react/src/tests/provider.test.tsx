@@ -40,11 +40,14 @@ const baseConfig = (over: Partial<TereoAuthConfig> = {}): TereoAuthConfig => ({
   ...over,
 });
 
-const storeTokens = () =>
+const jwt = (claims: Record<string, unknown>) =>
+  `h.${btoa(JSON.stringify(claims)).replace(/=+$/, "")}.s`;
+
+const storeTokens = (accessToken = "tok") =>
   localStorage.setItem(
     TOKENS_KEY,
     JSON.stringify({
-      access_token: "tok",
+      access_token: accessToken,
       token_type: "Bearer",
       expires_in: 900,
       scope: "openid",
@@ -249,6 +252,69 @@ describe("TereoAuthProvider", () => {
     await act(() => result.current.reloadUser());
 
     await waitFor(() => expect(result.current.user).toMatchObject({ v: 2 }));
+  });
+
+  it("reloads the user when another tab signs in to another organization", async () => {
+    storeTokens(jwt({ sub: "u1", org_id: "a" }));
+    loadUser.mockImplementation(async () => ({
+      permissions: [],
+      org: JSON.parse(localStorage.getItem(TOKENS_KEY)!).access_token,
+    }));
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: wrapperFor(baseConfig()),
+    });
+    await waitFor(() => expect(result.current.user).not.toBeNull());
+    expect(loadUser).toHaveBeenCalledTimes(1);
+
+    const orgB = jwt({ sub: "u1", org_id: "b" });
+    act(() => {
+      storeTokens(orgB);
+      window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
+    });
+
+    await waitFor(() =>
+      expect(result.current.user).toMatchObject({ org: orgB })
+    );
+    expect(loadUser).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not show the previous identity's user while the new one loads", async () => {
+    storeTokens(jwt({ sub: "u1", org_id: "a" }));
+    loadUser.mockResolvedValueOnce({ permissions: [], name: "Ada" });
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: wrapperFor(baseConfig()),
+    });
+    await waitFor(() => expect(result.current.user).not.toBeNull());
+
+    loadUser.mockReturnValueOnce(new Promise(() => {}));
+    act(() => {
+      storeTokens(jwt({ sub: "u2", org_id: "a" }));
+      window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
+    });
+
+    await waitFor(() => expect(loadUser).toHaveBeenCalledTimes(2));
+    expect(result.current.user).toBeNull();
+    expect(result.current.isLoading).toBe(true);
+  });
+
+  it("reloads the user once when its token is refreshed", async () => {
+    storeTokens(jwt({ sub: "u1", org_id: "a", jti: "1" }));
+    loadUser
+      .mockResolvedValueOnce({ permissions: [], v: 1 })
+      .mockResolvedValueOnce({ permissions: [], v: 2 });
+    const { result } = renderHook(() => useAuth(), {
+      wrapper: wrapperFor(baseConfig()),
+    });
+    await waitFor(() => expect(result.current.user).toMatchObject({ v: 1 }));
+
+    act(() => {
+      storeTokens(jwt({ sub: "u1", org_id: "a", jti: "2" }));
+      window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
+    });
+
+    await waitFor(() => expect(result.current.user).toMatchObject({ v: 2 }));
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(loadUser).toHaveBeenCalledTimes(2);
   });
 
   it("drops the user when another tab signs out", async () => {

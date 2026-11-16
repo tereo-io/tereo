@@ -177,6 +177,26 @@ describe("TereoAuthProvider live events", () => {
     expect(loadUser).toHaveBeenCalledTimes(2);
   });
 
+  it("reloads once, at once, when the token changes while an event reload is pending", async () => {
+    storeTokens();
+    const { result } = render(config());
+    await waitFor(() => expect(result.current.user).not.toBeNull());
+    await waitForSocket();
+
+    vi.useFakeTimers();
+    act(() =>
+      socket().emit("auth:permissions:changed", { reason: "r", timestamp: 1 })
+    );
+    act(() => {
+      storeTokens({ sub: "u1", sid: "s2" });
+      window.dispatchEvent(new StorageEvent("storage", { key: TOKENS_KEY }));
+    });
+    await act(() => vi.advanceTimersByTimeAsync(0));
+    expect(loadUser).toHaveBeenCalledTimes(2);
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(loadUser).toHaveBeenCalledTimes(2);
+  });
+
   it("ends only its own revoked session, locally, with no request", async () => {
     storeTokens();
     const post = vi.spyOn(axios, "post");
