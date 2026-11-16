@@ -145,6 +145,10 @@ export const ClientDetail = () => {
                     },
                   ]),
               {
+                label: "Live updates",
+                value: client.liveEvents ? "On" : "Off",
+              },
+              {
                 label: "Created",
                 value: formatDateTime(client.createdAt),
               },
