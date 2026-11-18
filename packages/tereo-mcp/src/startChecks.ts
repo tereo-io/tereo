@@ -213,12 +213,13 @@ export const runStartChecks = async (
   }
   checkPositiveInteger("maxResultBytes", options.maxResultBytes);
   checkPositiveInteger("toolTimeoutMs", options.toolTimeoutMs);
+  const { instructions } = options;
   if (
-    options.instructions !== undefined &&
-    (typeof options.instructions !== "string" ||
-      options.instructions.trim() === "")
+    instructions !== undefined &&
+    typeof instructions !== "function" &&
+    (typeof instructions !== "string" || instructions.trim() === "")
   ) {
-    fail("instructions, when given, must be a non-empty string");
+    fail("instructions, when given, must be a non-empty string or a function");
   }
   checkAllowedOrigins(options.allowedOrigins);
   checkScopes(options.scopes);

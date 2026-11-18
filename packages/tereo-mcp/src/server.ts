@@ -1,8 +1,8 @@
-import type { TereoMcpOptions, ToolContext, ToolDefinition } from "./types.js";
 import { isZodObject, toJsonSchemaError } from "./zodObject.js";
 import { McpServer } from "@modelcontextprotocol/server";
 import type { RateLimiter } from "./rateLimit.js";
 import { requestScope } from "./requestScope.js";
+import type { AuthContext } from "@tereo-io/sdk";
 import { hasPermission } from "@tereo-io/sdk";
 import { authFromInfo } from "./verifier.js";
 import { randomUUID } from "node:crypto";
@@ -14,6 +14,12 @@ import type {
   ServerContext,
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
+import type {
+  InstructionsContext,
+  TereoMcpOptions,
+  ToolContext,
+  ToolDefinition,
+} from "./types.js";
 
 export interface ServerDeps {
   options: TereoMcpOptions;
@@ -27,6 +33,63 @@ export interface ServerDeps {
 const DEFAULT_MAX_RESULT_BYTES = 1_000_000;
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 const NEVER_ABORTED = new AbortController().signal;
+const INSTRUCTIONS_TIMEOUT_MS = 2_000;
+// The methods whose answer carries the instructions, in either era.
+const INSTRUCTIONS_METHODS = ["initialize", "server/discover"];
+
+// Settles with work, or rejects with the signal's reason when it aborts first.
+const untilAborted = <T>(work: Promise<T>, signal: AbortSignal): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    work
+      .then(resolve, reject)
+      .finally(() => signal.removeEventListener("abort", onAbort));
+  });
+
+// A failing or slow function costs the caller the instructions, never the request.
+const resolveInstructions = async (
+  deps: ServerDeps,
+  auth: AuthContext | undefined,
+  requestId: string
+): Promise<string | undefined> => {
+  const { options, logger, closing } = deps;
+  const { instructions } = options;
+  if (typeof instructions !== "function") return instructions;
+  const methods = requestScope.getStore()?.methods ?? [];
+  if (!auth || !methods.some((m) => INSTRUCTIONS_METHODS.includes(m))) {
+    return undefined;
+  }
+  const signal = AbortSignal.any(
+    [AbortSignal.timeout(INSTRUCTIONS_TIMEOUT_MS), closing].filter(
+      (s): s is AbortSignal => s !== undefined
+    )
+  );
+  const ctx: InstructionsContext = {
+    auth,
+    core: options.core,
+    requestId,
+    logger: logger.child({ user_id: auth.userId, request_id: requestId }),
+    signal,
+  };
+  try {
+    const text: unknown = await untilAborted(
+      Promise.resolve().then(() => instructions(ctx)),
+      signal
+    );
+    if (typeof text !== "string") {
+      throw new Error("The instructions function did not return a string");
+    }
+    return text;
+  } catch (err) {
+    logger.error(
+      { user_id: auth.userId, request_id: requestId, err },
+      "MCP instructions failed"
+    );
+    return undefined;
+  }
+};
 
 const annotationsOf = (tool: ToolDefinition): ToolAnnotations => ({
   readOnlyHint: tool.readOnly,
@@ -39,19 +102,19 @@ export const buildServer = async (
   authInfo: AuthInfo | undefined
 ): Promise<McpServer> => {
   const { options, logger, limiters } = deps;
+  const auth = authFromInfo(authInfo);
+  const requestId = requestScope.getStore()?.requestId ?? randomUUID();
   // Declaring the capability up front answers tools/list with an empty list,
   // rather than "method not found", for a caller who may use no tool.
   const server = new McpServer(
     { name: options.name, version: options.version },
     {
       capabilities: { tools: { listChanged: false } },
-      instructions: options.instructions,
+      instructions: await resolveInstructions(deps, auth, requestId),
     }
   );
-  const auth = authFromInfo(authInfo);
   if (!auth) return server;
 
-  const requestId = requestScope.getStore()?.requestId ?? randomUUID();
   const maxResultBytes = options.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
   const { closing } = deps;
   const visible = deps.tools.filter(

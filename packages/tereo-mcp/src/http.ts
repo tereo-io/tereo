@@ -1,5 +1,4 @@
 import type { NextFunction, Request, Response, Router } from "express";
-import { createMcpHandler } from "@modelcontextprotocol/server";
 import { toNodeHandler } from "@modelcontextprotocol/node";
 import type { AddressInfo, Socket } from "node:net";
 import type { StartState } from "./startChecks.js";
@@ -18,6 +17,10 @@ import {
   mcpAuthMetadataRouter,
   requireBearerAuth,
 } from "@modelcontextprotocol/express";
+import {
+  createMcpHandler,
+  isJsonContentType,
+} from "@modelcontextprotocol/server";
 
 export interface Started extends ServerDeps {
   state: StartState;
@@ -27,6 +30,23 @@ export interface McpRoute {
   router: Router;
   close(): Promise<void>;
 }
+
+// Undefined when the body is empty or not JSON; it is read from a clone, so
+// the handler can still read the body itself and answer as it would have.
+const parsedBodyOf = async (request: globalThis.Request): Promise<unknown> => {
+  try {
+    const text = await request.clone().text();
+    return text.length === 0 ? undefined : JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+};
+
+const methodsOf = (body: unknown): string[] =>
+  (Array.isArray(body) ? body : [body]).flatMap((message: unknown) => {
+    const method = (message as { method?: unknown } | null)?.method;
+    return typeof method === "string" ? [method] : [];
+  });
 
 export const createRouter = (started: Started): Router =>
   createRoute(started).router;
@@ -50,7 +70,27 @@ export const createRoute = (
     (ctx) => buildServer({ ...started, closing }, ctx.authInfo),
     { onerror: (err) => logger.warn({ err }, "MCP request failed") }
   );
-  const handler = toNodeHandler(mcpHandler);
+  // Records the request's JSON-RPC methods for buildServer, which the
+  // handler's factory is not told. A body the host did not parse is read here
+  // (toNodeHandler has already capped its size) and passed on parsed.
+  const handler = toNodeHandler({
+    fetch: async (request, requestOptions) => {
+      let parsedBody = requestOptions?.parsedBody;
+      if (
+        parsedBody === undefined &&
+        request.method.toUpperCase() === "POST" &&
+        isJsonContentType(request.headers.get("content-type"))
+      ) {
+        parsedBody = await parsedBodyOf(request);
+      }
+      const scope = requestScope.getStore();
+      if (scope) scope.methods = methodsOf(parsedBody);
+      return mcpHandler.fetch(request, {
+        ...requestOptions,
+        ...(parsedBody !== undefined && { parsedBody }),
+      });
+    },
+  });
 
   const router = express.Router();
   router.all(path, (_req, _res, next) =>

@@ -21,6 +21,15 @@ export interface ToolContext {
   signal: AbortSignal;
 }
 
+export interface InstructionsContext {
+  auth: AuthContext;
+  core: CoreClient;
+  requestId: string;
+  logger: Logger;
+  /** Aborts after 2,000 ms, and when a `listen` server begins closing. */
+  signal: AbortSignal;
+}
+
 export type ToolInput =
   z.ZodObject | ((ctx: ToolContext) => z.ZodObject | Promise<z.ZodObject>);
 
@@ -74,8 +83,14 @@ export type RateLimitRedis = Pick<Redis, "incr" | "expire" | "ttl">;
 export interface TereoMcpOptions {
   name: string;
   version: string;
-  /** Sent to clients at initialize: how to use this server's tools. */
-  instructions?: string;
+  /**
+   * Sent to clients at initialize (or `server/discover`): how to use this
+   * server's tools. A function builds them per caller; it runs only for those
+   * two methods, within 2,000 ms, and when it throws or runs over the client
+   * gets no instructions.
+   */
+  instructions?:
+    string | ((ctx: InstructionsContext) => string | Promise<string>);
   core: CoreClient;
   publicUrl: string;
   allowedClients: string[];
