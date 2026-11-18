@@ -72,9 +72,12 @@ export const createRoute = (
   );
   // Records the request's JSON-RPC methods for buildServer, which the
   // handler's factory is not told. A body the host did not parse is read here
-  // (toNodeHandler has already capped its size) and passed on parsed.
+  // (toNodeHandler has already capped its size) and passed on parsed. Only an
+  // instructions function reads the methods, so only then is the body read.
+  const needsMethods = typeof options.instructions === "function";
   const handler = toNodeHandler({
     fetch: async (request, requestOptions) => {
+      if (!needsMethods) return mcpHandler.fetch(request, requestOptions);
       let parsedBody = requestOptions?.parsedBody;
       if (
         parsedBody === undefined &&

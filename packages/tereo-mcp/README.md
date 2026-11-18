@@ -151,8 +151,8 @@ const mcp = createTereoMcp({
 
 The function runs on every `initialize` (and `server/discover`) and is not rate-limited, so cache
 expensive work. It does not run for other messages, and `ctx.signal` aborts after 2 000 ms. If it
-throws, runs over or returns anything but a string, the failure is logged and the client is sent no
-instructions; the connection still works.
+throws, runs over or returns anything but a non-empty string, the failure is logged and the client
+is sent no instructions; the connection still works.
 
 ## Resources and tool UIs
 
@@ -162,8 +162,15 @@ advertises the `resources` capability only when at least one resource is defined
 `mimeType` are required, and `uri` is unique and an absolute URL as URL parsing writes it
 (`ui://app/card.html`, not `ui://app/a b.html`); `resource` throws, like `define`, once the server has
 started. `title`, `description` and `meta` (sent as `_meta` on the listing and on the contents) are
-optional. `read(ctx)` gets the same `ctx` as a tool and returns `{ text }` or `{ blob }` (base64). A
-read that throws is logged, and the client gets a generic MCP error.
+optional, and checked when the resource is defined. `read(ctx)` gets the same `ctx` as a tool and
+returns `{ text }` or `{ blob }` (base64).
+
+A read is bounded as a tool call is: it counts toward the caller's server-wide rate limit, ends
+after `toolTimeoutMs` (when `ctx.signal` aborts, as it does when the client disconnects or a
+`listen` server begins closing), and is refused above `maxResultBytes`. A read that throws, or
+returns anything but `{ text }` or `{ blob }` holding a string, is logged at error and the client
+gets a generic MCP error; a read that is cancelled, times out or is refused is logged at info or
+warn.
 
 ```ts
 mcp.resource({
@@ -174,7 +181,8 @@ mcp.resource({
 });
 ```
 
-A tool's `ui` links it to such a resource for MCP Apps, and is listed as `_meta.ui`. Its
+A tool's `ui` links it to such a resource for MCP Apps, and is listed as `_meta.ui` (with
+`resourceUri` also under the flat `_meta["ui/resourceUri"]` key that older hosts read). Its
 `resourceUri` starts with `ui://` and must be the `uri` of a defined resource. `visibility` is
 `["model"]`, `["app"]` or both; the client hides an `["app"]` tool from the model, but the server
 still lists it, checks its permission and counts it toward the rate limit.
@@ -477,7 +485,8 @@ handler: async (input, ctx) => {
 
 A fixed one-minute window per user id, counted in Redis under `@tereo-io/mcp:<name>:rl:<user>`,
 120 calls by default. Over the limit the call returns a tool error saying how many seconds to wait
-and the handler does not run. Only `tools/call` is counted: `input` functions, which run for every
+and the handler does not run. Only `tools/call` and `resources/read` are counted (a read over the
+limit answers an MCP error, and always counts toward the server-wide limit): `input` functions, which run for every
 protocol message, are not limited, and neither is a call whose arguments fail the schema, which the
 MCP SDK refuses before the limit is checked. If Redis fails the call goes through and the failure is
 logged at error.

@@ -192,8 +192,8 @@ const fetchMetadata = async (
 export const runStartChecks = async (
   options: TereoMcpOptions,
   tools: readonly ToolDefinition[],
-  fetchImpl: typeof fetch = fetch,
-  resources: readonly ResourceDefinition[] = []
+  resources: readonly ResourceDefinition[],
+  fetchImpl: typeof fetch = fetch
 ): Promise<StartState> => {
   const origin = checkPublicUrl(options.publicUrl);
   const path = options.path ?? "/mcp";

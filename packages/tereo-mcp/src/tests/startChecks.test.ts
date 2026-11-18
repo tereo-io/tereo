@@ -74,7 +74,7 @@ describe("runStartChecks", () => {
       ui: { resourceUri: "ui://app/missing.html" },
     };
     const message = await failure(
-      runStartChecks(options(), [withUi], answering(200, metadata), [])
+      runStartChecks(options(), [withUi], [], answering(200, metadata))
     );
     expect(message).toContain('"panel"');
     expect(message).toContain("ui://app/missing.html");
@@ -86,13 +86,14 @@ describe("runStartChecks", () => {
       read: () => ({ text: "" }),
     };
     await expect(
-      runStartChecks(options(), [withUi], answering(200, metadata), [defined])
+      runStartChecks(options(), [withUi], [defined], answering(200, metadata))
     ).resolves.toBeDefined();
   });
 
   it("joins the public URL and the path into the resource URL", async () => {
     const state = await runStartChecks(
       options({ publicUrl: "https://mcp.example.com/" }),
+      [],
       [],
       answering(200, metadata)
     );
@@ -104,6 +105,7 @@ describe("runStartChecks", () => {
     const state = await runStartChecks(
       options({ path: "/tools/mcp" }),
       [],
+      [],
       answering(200, metadata)
     );
     expect(state.resourceUrl).toBe("https://mcp.example.com/tools/mcp");
@@ -111,7 +113,7 @@ describe("runStartChecks", () => {
 
   it("refuses a path that does not start with a slash", async () => {
     const message = await failure(
-      runStartChecks(options({ path: "mcp" }), [], answering(200, metadata))
+      runStartChecks(options({ path: "mcp" }), [], [], answering(200, metadata))
     );
     expect(message).toContain("path");
   });
@@ -120,6 +122,7 @@ describe("runStartChecks", () => {
     const message = await failure(
       runStartChecks(
         options({ publicUrl: "not a url" }),
+        [],
         [],
         answering(200, metadata)
       )
@@ -135,7 +138,7 @@ describe("runStartChecks", () => {
     "ftp://mcp.example.com",
   ])("refuses publicUrl %s", async (publicUrl) => {
     const message = await failure(
-      runStartChecks(options({ publicUrl }), [], answering(200, metadata))
+      runStartChecks(options({ publicUrl }), [], [], answering(200, metadata))
     );
     expect(message).toContain("publicUrl");
   });
@@ -144,6 +147,7 @@ describe("runStartChecks", () => {
     const message = await failure(
       runStartChecks(
         options({ publicUrl: "http://mcp.example.com" }),
+        [],
         [],
         answering(200, metadata)
       )
@@ -159,6 +163,7 @@ describe("runStartChecks", () => {
     const state = await runStartChecks(
       options({ publicUrl }),
       [],
+      [],
       answering(200, metadata)
     );
     expect(state.resourceUrl).toBe(resourceUrl);
@@ -168,6 +173,7 @@ describe("runStartChecks", () => {
     const message = await failure(
       runStartChecks(
         options({ allowedClients: [] }),
+        [],
         [],
         answering(200, metadata)
       )
@@ -180,12 +186,14 @@ describe("runStartChecks", () => {
       runStartChecks(
         options({ redis: undefined }),
         [],
+        [],
         answering(200, metadata)
       )
     );
     expect(message).toContain("redis");
     await runStartChecks(
       options({ redis: undefined, rateLimit: false }),
+      [],
       [],
       answering(200, metadata)
     );
@@ -201,6 +209,7 @@ describe("runStartChecks", () => {
       runStartChecks(
         options({ redis: undefined, rateLimit: false }),
         [own],
+        [],
         answering(200, metadata)
       )
     );
@@ -209,6 +218,7 @@ describe("runStartChecks", () => {
     await runStartChecks(
       options({ redis: undefined, rateLimit: false }),
       [{ ...own, rateLimit: false }],
+      [],
       answering(200, metadata)
     );
   });
@@ -218,6 +228,7 @@ describe("runStartChecks", () => {
       runStartChecks(
         options({ provisioning: provisioning("q.items.read") }),
         [tool(null), tool("q.items.read"), tool("q.items.delete")],
+        [],
         answering(200, metadata)
       )
     );
@@ -229,6 +240,7 @@ describe("runStartChecks", () => {
     await runStartChecks(
       options({ provisioning: provisioning("q.items.read", "q.items.delete") }),
       [tool(null), tool("q.items.read"), tool("q.items.delete")],
+      [],
       answering(200, metadata)
     );
   });
@@ -237,6 +249,7 @@ describe("runStartChecks", () => {
     const fetchImpl = answering(200, metadata);
     await runStartChecks(
       options({ coreUrl: "https://core.internal:4001/" }),
+      [],
       [],
       fetchImpl
     );
@@ -255,6 +268,7 @@ describe("runStartChecks", () => {
         coreUrl: "http://given-core:4001",
       }),
       [],
+      [],
       fetchImpl
     );
     expect(String(fetchImpl.mock.calls[0][0])).toBe(
@@ -268,6 +282,7 @@ describe("runStartChecks", () => {
     await runStartChecks(
       options({ core: withUrl("http://client-core:4001"), coreUrl: undefined }),
       [],
+      [],
       fetchImpl
     );
     expect(String(fetchImpl.mock.calls[0][0])).toBe(
@@ -278,7 +293,7 @@ describe("runStartChecks", () => {
   it("falls back to CORE_URL when the core client has no url", async () => {
     vi.stubEnv("CORE_URL", "http://core:4001");
     const fetchImpl = answering(200, metadata);
-    await runStartChecks(options({ coreUrl: undefined }), [], fetchImpl);
+    await runStartChecks(options({ coreUrl: undefined }), [], [], fetchImpl);
     expect(String(fetchImpl.mock.calls[0][0])).toBe(
       "http://core:4001/.well-known/oauth-authorization-server"
     );
@@ -288,7 +303,7 @@ describe("runStartChecks", () => {
     vi.stubEnv("CORE_URL", undefined);
     const fetchImpl = answering(200, metadata);
     const message = await failure(
-      runStartChecks(options({ coreUrl: undefined }), [], fetchImpl)
+      runStartChecks(options({ coreUrl: undefined }), [], [], fetchImpl)
     );
     expect(message).toContain("coreUrl");
     expect(fetchImpl).not.toHaveBeenCalled();
@@ -296,7 +311,7 @@ describe("runStartChecks", () => {
 
   it("fails when the metadata fetch answers 500", async () => {
     const message = await failure(
-      runStartChecks(options(), [], answering(500, { error: "boom" }))
+      runStartChecks(options(), [], [], answering(500, { error: "boom" }))
     );
     expect(message).toContain(
       "https://tereo.example.test/.well-known/oauth-authorization-server"
@@ -308,7 +323,7 @@ describe("runStartChecks", () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => {
       throw new TypeError("fetch failed");
     });
-    const message = await failure(runStartChecks(options(), [], fetchImpl));
+    const message = await failure(runStartChecks(options(), [], [], fetchImpl));
     expect(message).toContain(
       "https://tereo.example.test/.well-known/oauth-authorization-server"
     );
@@ -320,7 +335,7 @@ describe("runStartChecks", () => {
     ["a non-string issuer", { ...metadata, issuer: 42 }],
   ])("fails on metadata that is %s", async (_label, body) => {
     const message = await failure(
-      runStartChecks(options(), [], answering(200, body))
+      runStartChecks(options(), [], [], answering(200, body))
     );
     expect(message).toContain(
       "https://tereo.example.test/.well-known/oauth-authorization-server"
@@ -336,7 +351,7 @@ describe("runStartChecks", () => {
     "https://tereo.example.test/#frag",
   ])("fails on the issuer %s, naming it", async (issuer) => {
     const message = await failure(
-      runStartChecks(options(), [], answering(200, { ...metadata, issuer }))
+      runStartChecks(options(), [], [], answering(200, { ...metadata, issuer }))
     );
     expect(message).toMatch(/^@tereo-io\/mcp cannot start: /);
     expect(message).toContain("issuer");
@@ -348,6 +363,7 @@ describe("runStartChecks", () => {
     async (issuer) => {
       const state = await runStartChecks(
         options(),
+        [],
         [],
         answering(200, { ...metadata, issuer })
       );
@@ -361,6 +377,7 @@ describe("runStartChecks", () => {
     const state = await runStartChecks(
       options(),
       [],
+      [],
       answering(200, { ...metadata, issuer })
     );
     expect(state.oauthMetadata.issuer).toBe(issuer);
@@ -372,6 +389,7 @@ describe("runStartChecks", () => {
       const message = await failure(
         runStartChecks(
           options({ rateLimit: { perMinute } }),
+          [],
           [],
           answering(200, metadata)
         )
@@ -387,6 +405,7 @@ describe("runStartChecks", () => {
         runStartChecks(
           options({ maxResultBytes }),
           [],
+          [],
           answering(200, metadata)
         )
       );
@@ -398,7 +417,12 @@ describe("runStartChecks", () => {
     "refuses toolTimeoutMs %s",
     async (toolTimeoutMs) => {
       const message = await failure(
-        runStartChecks(options({ toolTimeoutMs }), [], answering(200, metadata))
+        runStartChecks(
+          options({ toolTimeoutMs }),
+          [],
+          [],
+          answering(200, metadata)
+        )
       );
       expect(message).toContain("toolTimeoutMs");
     }
@@ -411,6 +435,7 @@ describe("runStartChecks", () => {
         runStartChecks(
           options({ instructions: instructions as string }),
           [],
+          [],
           answering(200, metadata)
         )
       );
@@ -422,6 +447,7 @@ describe("runStartChecks", () => {
     await runStartChecks(
       options({ instructions: "Ask for a connection first." }),
       [],
+      [],
       answering(200, metadata)
     );
   });
@@ -429,6 +455,7 @@ describe("runStartChecks", () => {
   it("accepts instructions built by a function", async () => {
     await runStartChecks(
       options({ instructions: (ctx) => `Hello ${ctx.auth.userId}.` }),
+      [],
       [],
       answering(200, metadata)
     );
@@ -441,6 +468,7 @@ describe("runStartChecks", () => {
         maxResultBytes: 1,
         toolTimeoutMs: 1,
       }),
+      [],
       [],
       answering(200, metadata)
     );
@@ -457,6 +485,7 @@ describe("runStartChecks", () => {
       runStartChecks(
         options({ allowedOrigins: ["https://ok.example.com", origin] }),
         [],
+        [],
         answering(200, metadata)
       )
     );
@@ -470,6 +499,7 @@ describe("runStartChecks", () => {
         allowedOrigins: ["https://app.example.com", "http://localhost:3000/"],
       }),
       [],
+      [],
       answering(200, metadata)
     );
   });
@@ -477,6 +507,7 @@ describe("runStartChecks", () => {
   it("accepts a list of scopes", async () => {
     await runStartChecks(
       options({ scopes: ["openid", "profile", "email"] }),
+      [],
       [],
       answering(200, metadata)
     );
@@ -491,6 +522,7 @@ describe("runStartChecks", () => {
       runStartChecks(
         options({ scopes: ["openid", scope] }),
         [],
+        [],
         answering(200, metadata)
       )
     );
@@ -504,6 +536,7 @@ describe("runStartChecks", () => {
       runStartChecks(
         options({ scopes: ["openid", "profile", "openid"] }),
         [],
+        [],
         answering(200, metadata)
       )
     );
@@ -515,6 +548,7 @@ describe("runStartChecks", () => {
     const message = await failure(
       runStartChecks(
         options({ scopes: ["openid", "offline_access"] }),
+        [],
         [],
         answering(200, metadata)
       )
@@ -528,7 +562,7 @@ describe("runStartChecks", () => {
     const fetchImpl = vi.fn<typeof fetch>(
       async () => new Response("<html>", { status: 200 })
     );
-    const message = await failure(runStartChecks(options(), [], fetchImpl));
+    const message = await failure(runStartChecks(options(), [], [], fetchImpl));
     expect(message).toContain(
       "https://tereo.example.test/.well-known/oauth-authorization-server"
     );

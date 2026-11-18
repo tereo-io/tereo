@@ -1,5 +1,5 @@
 import { checkListenOptions, runStartChecks } from "./startChecks.js";
-import { createLimiters } from "./rateLimit.js";
+import { createLimiters, createServerLimiter } from "./rateLimit.js";
 import { ToolRegistry } from "./registry.js";
 import type { Router } from "express";
 import type { z } from "zod";
@@ -47,16 +47,18 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
       registry.freeze();
       const tools = registry.list();
       const resources = registry.listResources();
-      started = runStartChecks(options, tools, undefined, resources).then(
-        (state) => ({
+      started = runStartChecks(options, tools, resources).then((state) => {
+        const serverLimiter = createServerLimiter(options, logger);
+        return {
           options,
           tools,
           resources,
           state,
           logger,
-          limiters: createLimiters(options, tools, logger),
-        })
-      );
+          limiters: createLimiters(options, tools, logger, serverLimiter),
+          serverLimiter,
+        };
+      });
       // A failed start (core unreachable, say) is retried by the next call.
       started.catch(() => {
         started = undefined;

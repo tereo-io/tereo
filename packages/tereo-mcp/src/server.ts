@@ -1,8 +1,10 @@
 import { isZodObject, toJsonSchemaError } from "./zodObject.js";
 import { McpServer } from "@modelcontextprotocol/server";
+import { anySignal, untilAborted } from "./signals.js";
 import type { RateLimiter } from "./rateLimit.js";
 import { requestScope } from "./requestScope.js";
 import type { AuthContext } from "@tereo-io/sdk";
+import { readResource } from "./readResource.js";
 import { hasPermission } from "@tereo-io/sdk";
 import { authFromInfo } from "./verifier.js";
 import { randomUUID } from "node:crypto";
@@ -27,6 +29,8 @@ export interface ServerDeps {
   tools: readonly ToolDefinition[];
   resources?: readonly ResourceDefinition[];
   limiters: ReadonlyMap<string, RateLimiter>;
+  // The server-wide limiter, which resource reads count toward.
+  serverLimiter?: RateLimiter | null;
   logger: Logger;
   // Aborts when a listen server begins closing; router() has none.
   closing?: AbortSignal;
@@ -38,16 +42,6 @@ const NEVER_ABORTED = new AbortController().signal;
 const INSTRUCTIONS_TIMEOUT_MS = 2_000;
 // The methods whose answer carries the instructions, in either era.
 const INSTRUCTIONS_METHODS = ["initialize", "server/discover"];
-
-const untilAborted = <T>(work: Promise<T>, signal: AbortSignal): Promise<T> =>
-  new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    if (signal.aborted) return onAbort();
-    signal.addEventListener("abort", onAbort, { once: true });
-    work
-      .then(resolve, reject)
-      .finally(() => signal.removeEventListener("abort", onAbort));
-  });
 
 // A failing or slow function costs the caller the instructions, never the request.
 const resolveInstructions = async (
@@ -62,10 +56,9 @@ const resolveInstructions = async (
   if (!auth || !methods.some((m) => INSTRUCTIONS_METHODS.includes(m))) {
     return undefined;
   }
-  const signal = AbortSignal.any(
-    [AbortSignal.timeout(INSTRUCTIONS_TIMEOUT_MS), closing].filter(
-      (s): s is AbortSignal => s !== undefined
-    )
+  const signal = anySignal(
+    AbortSignal.timeout(INSTRUCTIONS_TIMEOUT_MS),
+    closing
   );
   const ctx: InstructionsContext = {
     auth,
@@ -75,12 +68,11 @@ const resolveInstructions = async (
     signal,
   };
   try {
-    const text: unknown = await untilAborted(
-      Promise.resolve().then(() => instructions(ctx)),
-      signal
-    );
-    if (typeof text !== "string") {
-      throw new Error("The instructions function did not return a string");
+    const text: unknown = await untilAborted(() => instructions(ctx), signal);
+    if (typeof text !== "string" || text.trim() === "") {
+      throw new Error(
+        "The instructions function did not return a non-empty string"
+      );
     }
     return text;
   } catch (err) {
@@ -123,6 +115,7 @@ export const buildServer = async (
   );
   if (!auth) return server;
 
+  const maxResultBytes = options.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
   for (const resource of resources) {
     const { uri, meta } = resource;
     server.registerResource(
@@ -136,47 +129,32 @@ export const buildServer = async (
         mimeType: resource.mimeType,
         ...(meta !== undefined && { _meta: meta }),
       },
-      async (_uri, sdkCtx) => {
-        const ctx: ToolContext = {
-          auth,
-          core: options.core,
-          requestId,
-          logger: logger.child({
-            resource: uri,
-            user_id: auth.userId,
-            request_id: requestId,
-          }),
-          signal: AbortSignal.any(
-            [sdkCtx.mcpReq.signal, closing].filter(
-              (s): s is AbortSignal => s !== undefined
-            )
-          ),
-        };
-        try {
-          const body = await resource.read(ctx);
-          return {
-            contents: [
-              {
-                uri,
-                mimeType: resource.mimeType,
-                ...("text" in body ? { text: body.text } : { blob: body.blob }),
-                ...(meta !== undefined && { _meta: meta }),
-              },
-            ],
-          };
-        } catch (err) {
-          logger.error(
-            { resource: uri, user_id: auth.userId, request_id: requestId, err },
-            "MCP resource read failed"
-          );
-          // The SDK sends the message to the client; keep error text out of it.
-          throw new Error("The resource could not be read", { cause: err });
-        }
-      }
+      (_uri, sdkCtx) =>
+        readResource(
+          {
+            resource,
+            ctx: {
+              auth,
+              core: options.core,
+              requestId,
+              logger: logger.child({
+                resource: uri,
+                user_id: auth.userId,
+                request_id: requestId,
+              }),
+              signal: closing ?? NEVER_ABORTED,
+            },
+            limiter: deps.serverLimiter ?? null,
+            maxResultBytes,
+            timeoutMs: options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+            closing,
+            logger,
+          },
+          sdkCtx.mcpReq.signal
+        )
     );
   }
 
-  const maxResultBytes = options.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
   const visible = deps.tools.filter(
     (tool) =>
       tool.permission === null ||
@@ -248,6 +226,8 @@ export const buildServer = async (
       ...(tool.output && { outputSchema: tool.output }),
       ...(tool.ui && {
         _meta: {
+          // The flat key is the one older MCP Apps hosts read.
+          "ui/resourceUri": tool.ui.resourceUri,
           ui: {
             ...tool.ui,
             ...(tool.ui.visibility && { visibility: [...tool.ui.visibility] }),

@@ -140,6 +140,26 @@ export class ToolRegistry {
     if (typeof resource.read !== "function") {
       throw new Error(`Resource "${resource.uri}" needs a read function`);
     }
+    for (const key of ["title", "description"] as const) {
+      const value: unknown = resource[key];
+      if (
+        value !== undefined &&
+        (typeof value !== "string" || value.trim() === "")
+      ) {
+        throw new Error(
+          `Resource "${resource.uri}" needs ${key}, when given, to be a non-empty string`
+        );
+      }
+    }
+    const meta: unknown = resource.meta;
+    if (
+      meta !== undefined &&
+      (typeof meta !== "object" || meta === null || Array.isArray(meta))
+    ) {
+      throw new Error(
+        `Resource "${resource.uri}" needs meta, when given, to be an object`
+      );
+    }
     if (this.resources.has(resource.uri))
       throw new Error(`Resource "${resource.uri}" is already defined`);
     this.resources.set(resource.uri, resource);

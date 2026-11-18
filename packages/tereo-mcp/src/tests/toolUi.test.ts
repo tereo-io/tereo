@@ -39,7 +39,7 @@ const ui: ToolDefinition["ui"] = {
 };
 
 describe.each(["legacy", "modern"] as const)("tool ui (%s era)", (era) => {
-  it("lists a tool's ui as _meta.ui", async () => {
+  it("lists a tool's ui as _meta.ui and the flat ui/resourceUri key", async () => {
     const { server } = await serve(
       { rateLimit: false },
       tool("plain", () => "x", {
@@ -56,9 +56,11 @@ describe.each(["legacy", "modern"] as const)("tool ui (%s era)", (era) => {
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
 
     expect(byName.plain._meta).toEqual({
+      "ui/resourceUri": "ui://app/card.html",
       ui: { resourceUri: "ui://app/card.html", visibility: ["model", "app"] },
     });
     expect(byName.typed._meta).toEqual({
+      "ui/resourceUri": "ui://app/other.html",
       ui: { resourceUri: "ui://app/other.html" },
     });
     await client.close();
@@ -99,6 +101,7 @@ describe.each(["legacy", "modern"] as const)("tool ui (%s era)", (era) => {
       { era }
     );
     expect((await allowed.listTools()).tools[0]._meta).toEqual({
+      "ui/resourceUri": "ui://app/card.html",
       ui: { resourceUri: "ui://app/card.html", visibility: ["app"] },
     });
     expect((await allowed.callTool({ name: "secret" })).content).toEqual([

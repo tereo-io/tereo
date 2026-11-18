@@ -43,24 +43,33 @@ export const createRateLimiter =
     }
   };
 
+type LimiterOptions = Pick<TereoMcpOptions, "name" | "redis" | "rateLimit">;
+
+// One per-user counter shared by every tool without its own limit and by
+// resource reads; null when the server is not limited.
+export const createServerLimiter = (
+  options: LimiterOptions,
+  logger: Logger
+): RateLimiter | null =>
+  !options.redis || options.rateLimit === false
+    ? null
+    : createRateLimiter({
+        redis: options.redis,
+        service: options.name,
+        perMinute: options.rateLimit?.perMinute ?? DEFAULT_PER_MINUTE,
+        logger,
+      });
+
 // Keyed by tool name; a tool that is not limited has no entry.
 export const createLimiters = (
-  options: Pick<TereoMcpOptions, "name" | "redis" | "rateLimit">,
+  options: LimiterOptions,
   tools: readonly ToolDefinition[],
-  logger: Logger
+  logger: Logger,
+  serverWide: RateLimiter | null = createServerLimiter(options, logger)
 ): ReadonlyMap<string, RateLimiter> => {
   const limiters = new Map<string, RateLimiter>();
   const { redis } = options;
   if (!redis) return limiters;
-  const serverWide =
-    options.rateLimit === false
-      ? null
-      : createRateLimiter({
-          redis,
-          service: options.name,
-          perMinute: options.rateLimit?.perMinute ?? DEFAULT_PER_MINUTE,
-          logger,
-        });
   for (const tool of tools) {
     if (tool.rateLimit) {
       limiters.set(

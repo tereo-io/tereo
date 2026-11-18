@@ -115,6 +115,19 @@ describe.each(["legacy", "modern"] as const)(
       await client.close();
     });
 
+    it.each(["", "  \n"])(
+      "sends no instructions when the function returns %j",
+      async (blank) => {
+        const { server, lines } = await serve({ instructions: () => blank });
+        const client = await connect(server.url, token, { era });
+
+        expect(client.getInstructions()).toBeUndefined();
+        const failed = lines.find((l) => l.msg === "MCP instructions failed");
+        expect(failed).toMatchObject({ level: 50, user_id: "u1" });
+        await client.close();
+      }
+    );
+
     it(
       "sends no instructions when the function takes longer than 2 s",
       { timeout: 10_000 },
