@@ -67,6 +67,12 @@ interface ToolFields {
    * server-wide one. `false`: not limited. Unset: the server-wide limit.
    */
   rateLimit?: { perMinute: number } | false;
+  /**
+   * Links the tool to a `ui://` resource (MCP Apps), sent as `_meta.ui`.
+   * `visibility`: who may call it; `["app"]` hides it from the model but keeps
+   * its permission check and rate limit.
+   */
+  ui?: { resourceUri: string; visibility?: ("model" | "app")[] };
 }
 
 // With an output schema the handler returns what the schema parses: its input type.

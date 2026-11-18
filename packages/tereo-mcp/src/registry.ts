@@ -67,6 +67,32 @@ export class ToolRegistry {
         );
       }
     }
+    if (tool.ui !== undefined) {
+      const { ui } = tool;
+      if (
+        typeof ui !== "object" ||
+        ui === null ||
+        typeof ui.resourceUri !== "string" ||
+        !ui.resourceUri.startsWith("ui://")
+      ) {
+        throw new Error(
+          `Tool "${tool.name}" needs ui.resourceUri to be a string starting with ui://`
+        );
+      }
+      if (ui.visibility !== undefined) {
+        const seen: unknown = ui.visibility;
+        if (
+          !Array.isArray(seen) ||
+          seen.length === 0 ||
+          new Set(seen).size !== seen.length ||
+          !seen.every((v) => v === "model" || v === "app")
+        ) {
+          throw new Error(
+            `Tool "${tool.name}" needs ui.visibility to be a non-empty list of unique "model" or "app" values`
+          );
+        }
+      }
+    }
     if (tool.output !== undefined && !isZodObject(tool.output)) {
       throw new Error(
         `Tool "${tool.name}" needs output to be a z.object() schema`

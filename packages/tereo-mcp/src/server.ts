@@ -245,6 +245,7 @@ export const buildServer = async (
       description: tool.description,
       annotations: annotationsOf(tool),
       ...(tool.output && { outputSchema: tool.output }),
+      ...(tool.ui && { _meta: { ui: tool.ui } }),
     };
     if (schema) {
       server.registerTool(
