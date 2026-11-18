@@ -1,14 +1,14 @@
-import type {
-  ResourceDefinition,
-  TereoMcpOptions,
-  ToolDefinition,
-} from "../types.js";
 import { serveWithResources, tool } from "./support/serve.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
 import { connect } from "./support/connect.js";
 import { z } from "zod";
+import type {
+  ResourceDefinition,
+  TereoMcpOptions,
+  ToolDefinition,
+} from "../types.js";
 
 const token = "test-token-u1|client=claude|perms=";
 const cleanups: (() => Promise<void>)[] = [];

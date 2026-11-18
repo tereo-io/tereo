@@ -31,8 +31,8 @@ export interface McpRoute {
   close(): Promise<void>;
 }
 
-// Undefined when the body is empty or not JSON; it is read from a clone, so
-// the handler can still read the body itself and answer as it would have.
+// Read from a clone, so the handler can still read the body itself and answer
+// a bad one as it would have.
 const parsedBodyOf = async (request: globalThis.Request): Promise<unknown> => {
   try {
     const text = await request.clone().text();

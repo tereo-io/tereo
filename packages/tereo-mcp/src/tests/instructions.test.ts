@@ -7,6 +7,7 @@ import { startStubCore } from "../testing.js";
 import type { AddressInfo } from "node:net";
 import { createServer } from "node:http";
 import express from "express";
+import pino from "pino";
 import type {
   InstructionsContext,
   TereoMcpOptions,
@@ -193,6 +194,7 @@ describe.each(["legacy", "modern"] as const)(
         allowedClients: ["claude"],
         rateLimit: false,
         coreUrl: stub.coreUrl,
+        logger: pino({ level: "silent" }),
         instructions: (ctx) => `hello ${ctx.auth.userId}`,
       });
       mcp.define(tool("echo", () => "ok"));

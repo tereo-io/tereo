@@ -1,5 +1,5 @@
-import { isZodObject, toJsonSchemaError } from "./zodObject.js";
 import type { ResourceDefinition, ToolDefinition } from "./types.js";
+import { isZodObject, toJsonSchemaError } from "./zodObject.js";
 
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 

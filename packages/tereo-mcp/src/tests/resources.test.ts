@@ -1,9 +1,8 @@
-import type { ResourceDefinition, TereoMcpOptions } from "../types.js";
 import { afterEach, describe, expect, it } from "vitest";
+import { serveWithResources } from "./support/serve.js";
+import type { ResourceDefinition } from "../types.js";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
-import { startStubCore } from "../testing.js";
-import pino from "pino";
 import { connect } from "./support/connect.js";
 
 const token = "test-token-u1|client=claude|perms=";
@@ -24,32 +23,17 @@ const card = (extra: Partial<ResourceDefinition> = {}): ResourceDefinition => ({
   ...extra,
 });
 
-const serveResources = async (
-  resources: ResourceDefinition[],
-  extra: Partial<TereoMcpOptions> = {}
-) => {
-  const stub = await startStubCore();
-  cleanups.push(() => stub.close());
-  const lines: Record<string, unknown>[] = [];
-  const logger = pino({ level: "debug" }, {
-    write: (s: string) => lines.push(JSON.parse(s)),
-  } as never);
-  const mcp = createTereoMcp({
+const unstarted = () =>
+  createTereoMcp({
     name: "quotes",
     version: "1.0.0",
     core: fakeCore(),
     publicUrl: "https://mcp.example.test",
     allowedClients: ["claude"],
-    rateLimit: false,
-    coreUrl: stub.coreUrl,
-    logger,
-    ...extra,
   });
-  for (const r of resources) mcp.resource(r);
-  const server = await mcp.listen(0, "127.0.0.1", { signals: false });
-  cleanups.push(() => server.close());
-  return { server, lines, mcp };
-};
+
+const serveResources = (resources: ResourceDefinition[]) =>
+  serveWithResources(cleanups, {}, [], resources);
 
 describe.each(["legacy", "modern"] as const)("resources (%s era)", (era) => {
   it("lists a defined resource with its mimeType and _meta", async () => {
@@ -124,30 +108,14 @@ describe.each(["legacy", "modern"] as const)("resources (%s era)", (era) => {
     expect(logged).toMatchObject({ level: 50, resource: "ui://app/card.html" });
   });
 
-  it("refuses a uri that is not an absolute, normalised URL", () => {
-    const mcp = createTereoMcp({
-      name: "quotes",
-      version: "1.0.0",
-      core: fakeCore(),
-      publicUrl: "https://mcp.example.test",
-      allowedClients: ["claude"],
-    });
-    expect(() => mcp.resource(card({ uri: "card" }))).toThrow(
-      'resource uri "card" must be an absolute, normalised URL'
-    );
-    expect(() => mcp.resource(card({ uri: "ui://app/a b.html" }))).toThrow(
-      /normalised URL/
-    );
-  });
-
   it("reads a resource whose uri is already normalised", async () => {
     const { server } = await serveResources([
-      card({ uri: "ui://zeteo/panel-card.html" }),
+      card({ uri: "ui://app/panel-card.html" }),
     ]);
     const client = await connect(server.url, token, { era });
 
     const res = await client.readResource({
-      uri: "ui://zeteo/panel-card.html",
+      uri: "ui://app/panel-card.html",
     });
 
     expect(res.contents[0]).toMatchObject({ text: "<p>hi</p>" });
@@ -172,14 +140,18 @@ describe.each(["legacy", "modern"] as const)("resources (%s era)", (era) => {
 });
 
 describe("resource definition", () => {
+  it("refuses a uri that is not an absolute, normalised URL", () => {
+    const mcp = unstarted();
+    expect(() => mcp.resource(card({ uri: "card" }))).toThrow(
+      'resource uri "card" must be an absolute, normalised URL'
+    );
+    expect(() => mcp.resource(card({ uri: "ui://app/a b.html" }))).toThrow(
+      /normalised URL/
+    );
+  });
+
   it("refuses a second resource with the same uri", () => {
-    const mcp = createTereoMcp({
-      name: "quotes",
-      version: "1.0.0",
-      core: fakeCore(),
-      publicUrl: "https://mcp.example.test",
-      allowedClients: ["claude"],
-    });
+    const mcp = unstarted();
     mcp.resource(card());
     expect(() => mcp.resource(card({ name: "other" }))).toThrow(
       /already defined/

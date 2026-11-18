@@ -39,7 +39,6 @@ const INSTRUCTIONS_TIMEOUT_MS = 2_000;
 // The methods whose answer carries the instructions, in either era.
 const INSTRUCTIONS_METHODS = ["initialize", "server/discover"];
 
-// Settles with work, or rejects with the signal's reason when it aborts first.
 const untilAborted = <T>(work: Promise<T>, signal: AbortSignal): Promise<T> =>
   new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(signal.reason);
