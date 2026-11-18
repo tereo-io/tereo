@@ -30,6 +30,24 @@ export interface InstructionsContext {
   signal: AbortSignal;
 }
 
+export interface ResourceDefinition {
+  /** The resource's address, such as `ui://app/card.html`. Unique. */
+  uri: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType: string;
+  /** Sent as `_meta` on the listing and on the read contents. */
+  meta?: Record<string, unknown>;
+  /** Needs an authenticated caller, no permission. A throw answers an MCP error. */
+  read: (
+    ctx: ToolContext
+  ) =>
+    | { text: string }
+    | { blob: string }
+    | Promise<{ text: string } | { blob: string }>;
+}
+
 export type ToolInput =
   z.ZodObject | ((ctx: ToolContext) => z.ZodObject | Promise<z.ZodObject>);
 

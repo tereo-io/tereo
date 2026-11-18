@@ -16,6 +16,7 @@ import type {
 } from "@modelcontextprotocol/server";
 import type {
   InstructionsContext,
+  ResourceDefinition,
   TereoMcpOptions,
   ToolContext,
   ToolDefinition,
@@ -24,6 +25,7 @@ import type {
 export interface ServerDeps {
   options: TereoMcpOptions;
   tools: readonly ToolDefinition[];
+  resources?: readonly ResourceDefinition[];
   limiters: ReadonlyMap<string, RateLimiter>;
   logger: Logger;
   // Aborts when a listen server begins closing; router() has none.
@@ -102,6 +104,8 @@ export const buildServer = async (
   authInfo: AuthInfo | undefined
 ): Promise<McpServer> => {
   const { options, logger, limiters } = deps;
+  const { closing } = deps;
+  const resources = deps.resources ?? [];
   const auth = authFromInfo(authInfo);
   const requestId = requestScope.getStore()?.requestId ?? randomUUID();
   // Declaring the capability up front answers tools/list with an empty list,
@@ -109,14 +113,69 @@ export const buildServer = async (
   const server = new McpServer(
     { name: options.name, version: options.version },
     {
-      capabilities: { tools: { listChanged: false } },
+      capabilities: {
+        tools: { listChanged: false },
+        ...(resources.length > 0 && { resources: { listChanged: false } }),
+      },
       instructions: await resolveInstructions(deps, auth, requestId),
     }
   );
   if (!auth) return server;
 
+  for (const resource of resources) {
+    const { uri, meta } = resource;
+    server.registerResource(
+      resource.name,
+      uri,
+      {
+        ...(resource.title !== undefined && { title: resource.title }),
+        ...(resource.description !== undefined && {
+          description: resource.description,
+        }),
+        mimeType: resource.mimeType,
+        ...(meta !== undefined && { _meta: meta }),
+      },
+      async (_uri, sdkCtx) => {
+        const ctx: ToolContext = {
+          auth,
+          core: options.core,
+          requestId,
+          logger: logger.child({
+            resource: uri,
+            user_id: auth.userId,
+            request_id: requestId,
+          }),
+          signal: AbortSignal.any(
+            [sdkCtx.mcpReq.signal, closing].filter(
+              (s): s is AbortSignal => s !== undefined
+            )
+          ),
+        };
+        try {
+          const body = await resource.read(ctx);
+          return {
+            contents: [
+              {
+                uri,
+                mimeType: resource.mimeType,
+                ...("text" in body ? { text: body.text } : { blob: body.blob }),
+                ...(meta !== undefined && { _meta: meta }),
+              },
+            ],
+          };
+        } catch (err) {
+          logger.error(
+            { resource: uri, user_id: auth.userId, request_id: requestId, err },
+            "MCP resource read failed"
+          );
+          // The SDK sends the message to the client; keep error text out of it.
+          throw new Error("The resource could not be read", { cause: err });
+        }
+      }
+    );
+  }
+
   const maxResultBytes = options.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
-  const { closing } = deps;
   const visible = deps.tools.filter(
     (tool) =>
       tool.permission === null ||

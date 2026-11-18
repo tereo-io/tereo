@@ -6,6 +6,7 @@ export type {
   InstructionsContext,
   ListenOptions,
   RateLimitRedis,
+  ResourceDefinition,
   StaticTool,
   TereoMcpOptions,
   ToolContext,

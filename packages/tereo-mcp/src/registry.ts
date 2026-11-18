@@ -1,10 +1,11 @@
 import { isZodObject, toJsonSchemaError } from "./zodObject.js";
-import type { ToolDefinition } from "./types.js";
+import type { ResourceDefinition, ToolDefinition } from "./types.js";
 
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
+  private readonly resources = new Map<string, ResourceDefinition>();
   private frozen = false;
 
   define(tool: ToolDefinition): void {
@@ -86,6 +87,29 @@ export class ToolRegistry {
       }
     }
     this.tools.set(tool.name, tool);
+  }
+
+  defineResource(resource: ResourceDefinition): void {
+    if (this.frozen)
+      throw new Error(
+        "Resources cannot be defined after the server has started"
+      );
+    for (const key of ["uri", "name", "mimeType"] as const) {
+      const value: unknown = resource[key];
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new Error(`A resource needs ${key} to be a non-empty string`);
+      }
+    }
+    if (typeof resource.read !== "function") {
+      throw new Error(`Resource "${resource.uri}" needs a read function`);
+    }
+    if (this.resources.has(resource.uri))
+      throw new Error(`Resource "${resource.uri}" is already defined`);
+    this.resources.set(resource.uri, resource);
+  }
+
+  listResources(): readonly ResourceDefinition[] {
+    return [...this.resources.values()];
   }
 
   list(): readonly ToolDefinition[] {
