@@ -1,3 +1,13 @@
+## 0.2.0 (2026-11-18)
+
+### ⚠️  Breaking Changes
+
+- `instructions` may be a function of the caller, resources are served with `mcp.resource()`, and a tool can link to a `ui://` resource (MCP Apps) with `ui`. ([#64](https://github.com/tereo-io/tereo/pull/64))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.1.2 (2026-11-16)
 
 ### 🧱 Updated Dependencies

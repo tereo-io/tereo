@@ -1,6 +1,6 @@
 {
   "name": "@tereo-io/mcp",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "type": "module",
   "description": "Expose a Tereo app service's tools over the Model Context Protocol, authenticated by Tereo",
   "keywords": [
