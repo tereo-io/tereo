@@ -1,8 +1,10 @@
-import type { TereoMcpOptions, ToolContext, ToolDefinition } from "./types.js";
 import { isZodObject, toJsonSchemaError } from "./zodObject.js";
 import { McpServer } from "@modelcontextprotocol/server";
+import { anySignal, untilAborted } from "./signals.js";
 import type { RateLimiter } from "./rateLimit.js";
 import { requestScope } from "./requestScope.js";
+import type { AuthContext } from "@tereo-io/sdk";
+import { readResource } from "./readResource.js";
 import { hasPermission } from "@tereo-io/sdk";
 import { authFromInfo } from "./verifier.js";
 import { randomUUID } from "node:crypto";
@@ -14,11 +16,21 @@ import type {
   ServerContext,
   ToolAnnotations,
 } from "@modelcontextprotocol/server";
+import type {
+  InstructionsContext,
+  ResourceDefinition,
+  TereoMcpOptions,
+  ToolContext,
+  ToolDefinition,
+} from "./types.js";
 
 export interface ServerDeps {
   options: TereoMcpOptions;
   tools: readonly ToolDefinition[];
+  resources?: readonly ResourceDefinition[];
   limiters: ReadonlyMap<string, RateLimiter>;
+  // The server-wide limiter, which resource reads count toward.
+  serverLimiter?: RateLimiter | null;
   logger: Logger;
   // Aborts when a listen server begins closing; router() has none.
   closing?: AbortSignal;
@@ -27,6 +39,52 @@ export interface ServerDeps {
 const DEFAULT_MAX_RESULT_BYTES = 1_000_000;
 const DEFAULT_TOOL_TIMEOUT_MS = 60_000;
 const NEVER_ABORTED = new AbortController().signal;
+const INSTRUCTIONS_TIMEOUT_MS = 2_000;
+// The methods whose answer carries the instructions, in either era.
+const INSTRUCTIONS_METHODS = ["initialize", "server/discover"];
+
+// A failing or slow function costs the caller the instructions, never the request.
+const resolveInstructions = async (
+  deps: ServerDeps,
+  auth: AuthContext | undefined,
+  requestId: string
+): Promise<string | undefined> => {
+  const { options, logger, closing } = deps;
+  const { instructions } = options;
+  if (typeof instructions !== "function") return instructions;
+  const methods = requestScope.getStore()?.methods ?? [];
+  if (!auth || !methods.some((m) => INSTRUCTIONS_METHODS.includes(m))) {
+    return undefined;
+  }
+  const signal = anySignal(
+    AbortSignal.timeout(INSTRUCTIONS_TIMEOUT_MS),
+    closing
+  );
+  const ctx: InstructionsContext = {
+    auth,
+    core: options.core,
+    requestId,
+    logger: logger.child({ user_id: auth.userId, request_id: requestId }),
+    signal,
+  };
+  try {
+    const text: unknown = await untilAborted(() => instructions(ctx), signal);
+    if (typeof text !== "string" || text.trim() === "") {
+      throw new Error(
+        "The instructions function did not return a non-empty string"
+      );
+    }
+    return text;
+  } catch (err) {
+    const fields = { user_id: auth.userId, request_id: requestId, err };
+    if (closing?.aborted) {
+      logger.warn(fields, "MCP instructions stopped: server closing");
+    } else {
+      logger.error(fields, "MCP instructions failed");
+    }
+    return undefined;
+  }
+};
 
 const annotationsOf = (tool: ToolDefinition): ToolAnnotations => ({
   readOnlyHint: tool.readOnly,
@@ -39,21 +97,64 @@ export const buildServer = async (
   authInfo: AuthInfo | undefined
 ): Promise<McpServer> => {
   const { options, logger, limiters } = deps;
+  const { closing } = deps;
+  const resources = deps.resources ?? [];
+  const auth = authFromInfo(authInfo);
+  const requestId = requestScope.getStore()?.requestId ?? randomUUID();
   // Declaring the capability up front answers tools/list with an empty list,
   // rather than "method not found", for a caller who may use no tool.
   const server = new McpServer(
     { name: options.name, version: options.version },
     {
-      capabilities: { tools: { listChanged: false } },
-      instructions: options.instructions,
+      capabilities: {
+        tools: { listChanged: false },
+        ...(resources.length > 0 && { resources: { listChanged: false } }),
+      },
+      instructions: await resolveInstructions(deps, auth, requestId),
     }
   );
-  const auth = authFromInfo(authInfo);
   if (!auth) return server;
 
-  const requestId = requestScope.getStore()?.requestId ?? randomUUID();
   const maxResultBytes = options.maxResultBytes ?? DEFAULT_MAX_RESULT_BYTES;
-  const { closing } = deps;
+  for (const resource of resources) {
+    const { uri, meta } = resource;
+    server.registerResource(
+      resource.name,
+      uri,
+      {
+        ...(resource.title !== undefined && { title: resource.title }),
+        ...(resource.description !== undefined && {
+          description: resource.description,
+        }),
+        mimeType: resource.mimeType,
+        ...(meta !== undefined && { _meta: meta }),
+      },
+      (_uri, sdkCtx) =>
+        readResource(
+          {
+            resource,
+            ctx: {
+              auth,
+              core: options.core,
+              requestId,
+              logger: logger.child({
+                resource: uri,
+                user_id: auth.userId,
+                request_id: requestId,
+              }),
+              signal: closing ?? NEVER_ABORTED,
+            },
+            limiter: deps.serverLimiter ?? null,
+            maxResultBytes,
+            timeoutMs: options.toolTimeoutMs ?? DEFAULT_TOOL_TIMEOUT_MS,
+            closing,
+            logger,
+          },
+          sdkCtx.mcpReq.signal
+        )
+    );
+  }
+
   const visible = deps.tools.filter(
     (tool) =>
       tool.permission === null ||
@@ -123,6 +224,16 @@ export const buildServer = async (
       description: tool.description,
       annotations: annotationsOf(tool),
       ...(tool.output && { outputSchema: tool.output }),
+      ...(tool.ui && {
+        _meta: {
+          // The flat key is the one older MCP Apps hosts read.
+          "ui/resourceUri": tool.ui.resourceUri,
+          ui: {
+            ...tool.ui,
+            ...(tool.ui.visibility && { visibility: [...tool.ui.visibility] }),
+          },
+        },
+      }),
     };
     if (schema) {
       server.registerTool(

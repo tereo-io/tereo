@@ -2,6 +2,7 @@ import type { OAuthMetadata } from "@modelcontextprotocol/server";
 import { parseOrigin } from "./validation.js";
 import type {
   ListenOptions,
+  ResourceDefinition,
   TereoMcpOptions,
   ToolDefinition,
 } from "./types.js";
@@ -191,6 +192,7 @@ const fetchMetadata = async (
 export const runStartChecks = async (
   options: TereoMcpOptions,
   tools: readonly ToolDefinition[],
+  resources: readonly ResourceDefinition[],
   fetchImpl: typeof fetch = fetch
 ): Promise<StartState> => {
   const origin = checkPublicUrl(options.publicUrl);
@@ -213,16 +215,25 @@ export const runStartChecks = async (
   }
   checkPositiveInteger("maxResultBytes", options.maxResultBytes);
   checkPositiveInteger("toolTimeoutMs", options.toolTimeoutMs);
+  const { instructions } = options;
   if (
-    options.instructions !== undefined &&
-    (typeof options.instructions !== "string" ||
-      options.instructions.trim() === "")
+    instructions !== undefined &&
+    typeof instructions !== "function" &&
+    (typeof instructions !== "string" || instructions.trim() === "")
   ) {
-    fail("instructions, when given, must be a non-empty string");
+    fail("instructions, when given, must be a non-empty string or a function");
   }
   checkAllowedOrigins(options.allowedOrigins);
   checkScopes(options.scopes);
   checkPermissions(options, tools);
+  const resourceUris = new Set(resources.map((r) => r.uri));
+  for (const tool of tools) {
+    if (tool.ui && !resourceUris.has(tool.ui.resourceUri)) {
+      fail(
+        `tool "${tool.name}" has ui.resourceUri ${JSON.stringify(tool.ui.resourceUri)}, which is not the uri of a defined resource`
+      );
+    }
+  }
 
   const coreUrl =
     options.coreUrl ??

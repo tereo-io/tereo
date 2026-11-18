@@ -1,11 +1,12 @@
 import { checkListenOptions, runStartChecks } from "./startChecks.js";
-import { createLimiters } from "./rateLimit.js";
+import { createLimiters, createServerLimiter } from "./rateLimit.js";
 import { ToolRegistry } from "./registry.js";
 import type { Router } from "express";
 import type { z } from "zod";
 import pino from "pino";
 import type {
   ListenOptions,
+  ResourceDefinition,
   StaticTool,
   TereoMcpOptions,
   ToolDefinition,
@@ -27,6 +28,7 @@ export interface TereoMcp {
   define<I = unknown, O extends z.ZodObject | undefined = undefined>(
     tool: ToolDefinition<I, O>
   ): void;
+  resource(def: ResourceDefinition): void;
   router(): Promise<Router>;
   listen(
     port: number,
@@ -44,13 +46,19 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
     if (!started) {
       registry.freeze();
       const tools = registry.list();
-      started = runStartChecks(options, tools).then((state) => ({
-        options,
-        tools,
-        state,
-        logger,
-        limiters: createLimiters(options, tools, logger),
-      }));
+      const resources = registry.listResources();
+      started = runStartChecks(options, tools, resources).then((state) => {
+        const serverLimiter = createServerLimiter(options, logger);
+        return {
+          options,
+          tools,
+          resources,
+          state,
+          logger,
+          limiters: createLimiters(options, tools, logger, serverLimiter),
+          serverLimiter,
+        };
+      });
       // A failed start (core unreachable, say) is retried by the next call.
       started.catch(() => {
         started = undefined;
@@ -63,6 +71,7 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
     // Every overload's definition is a ToolDefinition<never>: no handler input type is narrower.
     define: (tool: ToolDefinition<never>) =>
       registry.define(tool as ToolDefinition),
+    resource: (def) => registry.defineResource(def),
     router: async () => createRouter(await start()),
     listen: async (port, host, listenOptions) => {
       checkListenOptions(listenOptions);

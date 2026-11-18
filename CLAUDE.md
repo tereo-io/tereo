@@ -16,7 +16,7 @@ built on [`@kosmeo-ui/react`](https://github.com/kosmeo-ui/kosmeo-ui) from npm. 
 core's image and core serves it at `/`, around core's API under `/v1`.
 The Helm chart is `charts/tereo` (external Postgres and Redis; migrations as a hook), released with
 the image at the same version.
-`@tereo-io/mcp` (`packages/tereo-mcp`) lets an app service serve MCP tools to clients that sign in through core, each tool gated by a Tereo permission.
+`@tereo-io/mcp` (`packages/tereo-mcp`) lets an app service serve MCP tools to clients that sign in through core, each tool gated by a Tereo permission, with instructions that may depend on the caller, resources, and `ui` links from tools to `ui://` resources (MCP Apps).
 Outbound HTTP goes through the request handler [`@dianemo/core`](https://github.com/dianemo/dianemo).
 
 Read [README.md](README.md) first; its *Current state* section lists what is done and what is not.

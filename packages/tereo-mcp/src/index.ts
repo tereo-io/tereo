@@ -3,8 +3,10 @@ export { ToolError } from "./errors.js";
 export { hostHeaderValidation, originValidation } from "./validation.js";
 export type { Listening } from "./http.js";
 export type {
+  InstructionsContext,
   ListenOptions,
   RateLimitRedis,
+  ResourceDefinition,
   StaticTool,
   TereoMcpOptions,
   ToolContext,

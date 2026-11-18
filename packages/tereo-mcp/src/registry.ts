@@ -1,10 +1,11 @@
+import type { ResourceDefinition, ToolDefinition } from "./types.js";
 import { isZodObject, toJsonSchemaError } from "./zodObject.js";
-import type { ToolDefinition } from "./types.js";
 
 const NAME_PATTERN = /^[a-z0-9_]+$/;
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();
+  private readonly resources = new Map<string, ResourceDefinition>();
   private frozen = false;
 
   define(tool: ToolDefinition): void {
@@ -66,6 +67,32 @@ export class ToolRegistry {
         );
       }
     }
+    if (tool.ui !== undefined) {
+      const { ui } = tool;
+      if (
+        typeof ui !== "object" ||
+        ui === null ||
+        typeof ui.resourceUri !== "string" ||
+        !ui.resourceUri.startsWith("ui://")
+      ) {
+        throw new Error(
+          `Tool "${tool.name}" needs ui.resourceUri to be a string starting with ui://`
+        );
+      }
+      if (ui.visibility !== undefined) {
+        const seen: unknown = ui.visibility;
+        if (
+          !Array.isArray(seen) ||
+          seen.length === 0 ||
+          new Set(seen).size !== seen.length ||
+          !seen.every((v) => v === "model" || v === "app")
+        ) {
+          throw new Error(
+            `Tool "${tool.name}" needs ui.visibility to be a non-empty list of unique "model" or "app" values`
+          );
+        }
+      }
+    }
     if (tool.output !== undefined && !isZodObject(tool.output)) {
       throw new Error(
         `Tool "${tool.name}" needs output to be a z.object() schema`
@@ -86,6 +113,60 @@ export class ToolRegistry {
       }
     }
     this.tools.set(tool.name, tool);
+  }
+
+  defineResource(resource: ResourceDefinition): void {
+    if (this.frozen)
+      throw new Error(
+        "Resources cannot be defined after the server has started"
+      );
+    for (const key of ["uri", "name", "mimeType"] as const) {
+      const value: unknown = resource[key];
+      if (typeof value !== "string" || value.trim() === "") {
+        throw new Error(`A resource needs ${key} to be a non-empty string`);
+      }
+    }
+    let normalised: string | undefined;
+    try {
+      normalised = new URL(resource.uri).toString();
+    } catch {
+      normalised = undefined;
+    }
+    if (normalised !== resource.uri) {
+      throw new Error(
+        `resource uri ${JSON.stringify(resource.uri)} must be an absolute, normalised URL`
+      );
+    }
+    if (typeof resource.read !== "function") {
+      throw new Error(`Resource "${resource.uri}" needs a read function`);
+    }
+    for (const key of ["title", "description"] as const) {
+      const value: unknown = resource[key];
+      if (
+        value !== undefined &&
+        (typeof value !== "string" || value.trim() === "")
+      ) {
+        throw new Error(
+          `Resource "${resource.uri}" needs ${key}, when given, to be a non-empty string`
+        );
+      }
+    }
+    const meta: unknown = resource.meta;
+    if (
+      meta !== undefined &&
+      (typeof meta !== "object" || meta === null || Array.isArray(meta))
+    ) {
+      throw new Error(
+        `Resource "${resource.uri}" needs meta, when given, to be an object`
+      );
+    }
+    if (this.resources.has(resource.uri))
+      throw new Error(`Resource "${resource.uri}" is already defined`);
+    this.resources.set(resource.uri, resource);
+  }
+
+  listResources(): readonly ResourceDefinition[] {
+    return [...this.resources.values()];
   }
 
   list(): readonly ToolDefinition[] {

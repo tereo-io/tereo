@@ -21,6 +21,33 @@ export interface ToolContext {
   signal: AbortSignal;
 }
 
+export interface InstructionsContext {
+  auth: AuthContext;
+  core: CoreClient;
+  requestId: string;
+  logger: Logger;
+  /** Aborts after 2,000 ms, and when a `listen` server begins closing. */
+  signal: AbortSignal;
+}
+
+export interface ResourceDefinition {
+  /** The resource's address, such as `ui://app/card.html`. Unique. */
+  uri: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType: string;
+  /** Sent as `_meta` on the listing and on the read contents. */
+  meta?: Record<string, unknown>;
+  /** Needs an authenticated caller, no permission. A throw answers an MCP error. */
+  read: (
+    ctx: ToolContext
+  ) =>
+    | { text: string }
+    | { blob: string }
+    | Promise<{ text: string } | { blob: string }>;
+}
+
 export type ToolInput =
   z.ZodObject | ((ctx: ToolContext) => z.ZodObject | Promise<z.ZodObject>);
 
@@ -40,6 +67,12 @@ interface ToolFields {
    * server-wide one. `false`: not limited. Unset: the server-wide limit.
    */
   rateLimit?: { perMinute: number } | false;
+  /**
+   * Links the tool to a `ui://` resource (MCP Apps), sent as `_meta.ui`.
+   * `visibility`: who may call it; `["app"]` hides it from the model but keeps
+   * its permission check and rate limit.
+   */
+  ui?: { resourceUri: string; visibility?: ("model" | "app")[] };
 }
 
 // With an output schema the handler returns what the schema parses: its input type.
@@ -74,8 +107,14 @@ export type RateLimitRedis = Pick<Redis, "incr" | "expire" | "ttl">;
 export interface TereoMcpOptions {
   name: string;
   version: string;
-  /** Sent to clients at initialize: how to use this server's tools. */
-  instructions?: string;
+  /**
+   * Sent to clients at initialize (or `server/discover`): how to use this
+   * server's tools. A function builds them per caller; it runs only for those
+   * two methods, within 2,000 ms, and when it throws or runs over the client
+   * gets no instructions.
+   */
+  instructions?:
+    string | ((ctx: InstructionsContext) => string | Promise<string>);
   core: CoreClient;
   publicUrl: string;
   allowedClients: string[];
