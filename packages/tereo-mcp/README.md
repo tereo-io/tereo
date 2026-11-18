@@ -13,7 +13,7 @@ It is ESM only and built on Node.js 22. Peer dependencies: `@tereo-io/sdk`, `exp
 4.2 or later (the MCP SDK needs it) and `ioredis`; `@modelcontextprotocol/client` is an optional
 peer, needed only for `@tereo-io/mcp/testing`.
 
-Tools only: MCP resources and prompts are not supported.
+Tools and resources are supported; prompts are not.
 
 ```ts
 import { createTereoMcp, ToolError } from "@tereo-io/mcp";
@@ -68,7 +68,7 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | Option | Required | |
 |--------|----------|---|
 | `name`, `version` | yes | Reported to MCP clients |
-| `instructions` | no | A non-empty string sent to clients at initialize: how to use this server's tools. See [Instructions and titles](#instructions-and-titles) |
+| `instructions` | no | A non-empty string, or a function of the caller returning one, sent to clients at initialize: how to use this server's tools. See [Instructions and titles](#instructions-and-titles) |
 | `core` | yes | The app's `CoreClient`. Its `service` slug is the audience core checks at introspection |
 | `publicUrl` | yes | Public origin of this server, with no path; https unless the host is loopback. The MCP endpoint is `${publicUrl}${path}` |
 | `allowedClients` | yes | Non-empty list of `client_id`s; tokens issued to any other client are refused |
@@ -98,6 +98,7 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 | `output` | no | `z.object(...)`, static only. The result is validated and sent as structured content too. See [Structured results](#structured-results) |
 | `handler` | yes | `(input, ctx) => value`. A string is returned as text; any other JSON value as JSON text |
 | `timeoutMs` | no | A positive integer; overrides `toolTimeoutMs` for this tool |
+| `ui` | no | `{ resourceUri, visibility? }`: links the tool to a `ui://` resource (MCP Apps). See [Resources and tool UIs](#resources-and-tool-uis) |
 | `rateLimit` | no | `{ perMinute }` (a positive integer) for the tool's own limit, or `false` for none. Unset: the server-wide limit. See [Rate limit](#rate-limit) |
 
 `define` throws once the server has started (`router()` or `listen()` was called), and when a
@@ -134,6 +135,57 @@ for that request; the caller's other tools still list and run.
 it in the model's context, so say there how the tools fit together. A tool's `title` is listed
 with the tool in `tools/list` for clients to show people; the model still calls the tool by
 `name`.
+
+`instructions` can also be a function of the caller, for text that depends on who is asking:
+
+```ts
+const mcp = createTereoMcp({
+  // …
+  instructions: async (ctx) => {          // ctx: auth, core, requestId, logger, signal
+    const sources = await listSourcesFor(ctx.auth.userId, ctx.signal);
+    return `Query only these sources: ${sources.join(", ")}.`;
+  },
+});
+```
+
+The function runs only for `initialize` and `server/discover`, not for every message, and
+`ctx.signal` aborts after 2 000 ms. If it throws, runs over or returns anything but a string, the failure
+is logged and the client is sent no instructions; the connection still works.
+
+## Resources and tool UIs
+
+`mcp.resource(def)` serves an MCP resource. Any authenticated caller may list and read it: there is
+no permission check, so a resource must hold nothing a signed-in user should not see. The server
+advertises the `resources` capability only when at least one resource is defined. `uri`, `name` and
+`mimeType` are required and `uri` is unique; `resource` throws, like `define`, once the server has
+started. `title`, `description` and `meta` (sent as `_meta` on the listing and on the contents) are
+optional. `read(ctx)` gets the same `ctx` as a tool and returns `{ text }` or `{ blob }` (base64). A
+read that throws is logged, and the client gets a generic MCP error.
+
+```ts
+mcp.resource({
+  uri: "ui://query/chart.html",
+  name: "chart",
+  mimeType: "text/html;profile=mcp-app",
+  read: async () => ({ text: chartHtml }),
+});
+```
+
+A tool's `ui` links it to such a resource for MCP Apps, and is listed as `_meta.ui`. `visibility` is
+`["model"]`, `["app"]` or both; an `["app"]` tool is hidden from the model but still checks its
+permission and counts toward the rate limit.
+
+```ts
+mcp.define({
+  name: "show_chart",
+  description: "Show a saved chart",
+  permission: "query.queries.run",
+  readOnly: true,
+  input: z.object({ id: z.string() }),
+  ui: { resourceUri: "ui://query/chart.html" },
+  handler: async ({ id }) => loadChart(id),
+});
+```
 
 ## Serving
 
@@ -296,7 +348,7 @@ metadata, so clients request them at sign-in. That is what makes `ctx.auth.name`
 - `redis` is missing and `rateLimit` is not `false`;
 - a tool sets its own `rateLimit` and `redis` is missing;
 - `rateLimit.perMinute`, `maxResultBytes` or `toolTimeoutMs` is given and is not a positive integer;
-- `instructions` is given and is not a non-empty string;
+- `instructions` is given and is neither a non-empty string nor a function;
 - an `allowedOrigins` entry is not an http or https origin (scheme, host and optional port only);
 - a `scopes` entry is empty, contains whitespace, a quote or a backslash, is repeated, or is `offline_access`;
 - with `provisioning`, a tool needs a permission the document's service does not declare;
