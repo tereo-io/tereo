@@ -20,13 +20,13 @@ import { createTereoMcp, ToolError } from "@tereo-io/mcp";
 import * as z from "zod/v4";
 
 const mcp = createTereoMcp({
-  name: "query-service",                    // MCP server name shown to clients
+  name: "query-service", // MCP server name shown to clients
   version: "1.0.0",
-  core,                                     // CoreClient from createCoreClient(), already started
-  publicUrl: "https://mcp.example.com",     // this server's public origin
+  core, // CoreClient from createCoreClient(), already started
+  publicUrl: "https://mcp.example.com", // this server's public origin
   allowedClients: ["claude-connector", "chatgpt-connector"],
-  redis,                                    // for the rate limit; omit only with rateLimit: false
-  provisioning: document,                   // optional: the service's provisioning document
+  redis, // for the rate limit; omit only with rateLimit: false
+  provisioning: document, // optional: the service's provisioning document
 });
 
 mcp.define({
@@ -43,7 +43,8 @@ mcp.define({
   permission: "query.connections.read",
   readOnly: true,
   input: z.object({ connectionId: z.string() }),
-  handler: async (input, ctx) =>                       // input: { connectionId: string }
+  handler: async (input, ctx) =>
+    // input: { connectionId: string }
     describeConnection(input.connectionId, { signal: ctx.signal }),
 });
 
@@ -52,11 +53,11 @@ mcp.define({
   description: "Run a read-only query against a connection",
   permission: "query.queries.run",
   readOnly: true,
-  input: async (ctx) => querySchemaFor(ctx.auth.userId),   // per-user schema
-  handler: async (input, ctx) => runQuery(ctx.auth, input),   // input: unknown
+  input: async (ctx) => querySchemaFor(ctx.auth.userId), // per-user schema
+  handler: async (input, ctx) => runQuery(ctx.auth, input), // input: unknown
 });
 
-const server = await mcp.listen(4002);      // or: app.use(await mcp.router())
+const server = await mcp.listen(4002); // or: app.use(await mcp.router())
 await server.close();
 ```
 
@@ -65,41 +66,41 @@ Clients sign in through Tereo, so each one needs a login client created there fi
 
 ## `createTereoMcp(options)`
 
-| Option | Required | |
-|--------|----------|---|
-| `name`, `version` | yes | Reported to MCP clients |
-| `instructions` | no | A non-empty string, or a function of the caller returning one, sent to clients at initialize: how to use this server's tools. See [Instructions and titles](#instructions-and-titles) |
-| `core` | yes | The app's `CoreClient`. Its `service` slug is the audience core checks at introspection |
-| `publicUrl` | yes | Public origin of this server, with no path; https unless the host is loopback. The MCP endpoint is `${publicUrl}${path}` |
-| `allowedClients` | yes | Non-empty list of `client_id`s; tokens issued to any other client are refused |
-| `path` | no | Default `/mcp`. Must start with `/` |
-| `redis` | unless `rateLimit: false` | An `ioredis` client, owned by the caller |
-| `rateLimit` | no | `{ perMinute }` (default 120; a positive integer) or `false` |
-| `allowServiceAccounts` | no | Default `false`: `client_credentials` tokens are refused |
-| `allowedOrigins` | no | Browser origins allowed to call the endpoint, such as `https://app.example.com` (`listen` only). See [Serving](#serving) |
-| `scopes` | no | OAuth scopes advertised to clients, typically `["openid", "profile", "email"]`; advertised only, never required. See [Scopes](#scopes) |
-| `provisioning` | no | The service's provisioning document, for the start-time permission check |
-| `coreUrl` | no | Core's base URL, for fetching its authorization-server metadata at start. Default: the URL `core` was created with (`core.url`, which a client from an `@tereo-io/sdk` before 0.5.2 lacks), else `CORE_URL` |
-| `logger` | no | A Pino logger. Default a new one named `@tereo-io/mcp` |
-| `maxResultBytes` | no | Default 1 000 000; a positive integer. A larger result becomes a tool error instead of flooding the model |
-| `toolTimeoutMs` | no | Default 60 000; a positive integer. How long a tool call may run. See [Timeouts and cancellation](#timeouts-and-cancellation) |
+| Option                 | Required                  |                                                                                                                                                                                                             |
+| ---------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`, `version`      | yes                       | Reported to MCP clients                                                                                                                                                                                     |
+| `instructions`         | no                        | A non-empty string, or a function of the caller returning one, sent to clients at initialize: how to use this server's tools. See [Instructions and titles](#instructions-and-titles)                       |
+| `core`                 | yes                       | The app's `CoreClient`. Its `service` slug is the audience core checks at introspection                                                                                                                     |
+| `publicUrl`            | yes                       | Public origin of this server, with no path; https unless the host is loopback. The MCP endpoint is `${publicUrl}${path}`                                                                                    |
+| `allowedClients`       | yes                       | Non-empty list of `client_id`s; tokens issued to any other client are refused                                                                                                                               |
+| `path`                 | no                        | Default `/mcp`. Must start with `/`                                                                                                                                                                         |
+| `redis`                | unless `rateLimit: false` | An `ioredis` client, owned by the caller                                                                                                                                                                    |
+| `rateLimit`            | no                        | `{ perMinute }` (default 120; a positive integer) or `false`                                                                                                                                                |
+| `allowServiceAccounts` | no                        | Default `false`: `client_credentials` tokens are refused                                                                                                                                                    |
+| `allowedOrigins`       | no                        | Browser origins allowed to call the endpoint, such as `https://app.example.com` (`listen` only). See [Serving](#serving)                                                                                    |
+| `scopes`               | no                        | OAuth scopes advertised to clients, typically `["openid", "profile", "email"]`; advertised only, never required. See [Scopes](#scopes)                                                                      |
+| `provisioning`         | no                        | The service's provisioning document, for the start-time permission check                                                                                                                                    |
+| `coreUrl`              | no                        | Core's base URL, for fetching its authorization-server metadata at start. Default: the URL `core` was created with (`core.url`, which a client from an `@tereo-io/sdk` before 0.5.2 lacks), else `CORE_URL` |
+| `logger`               | no                        | A Pino logger. Default a new one named `@tereo-io/mcp`                                                                                                                                                      |
+| `maxResultBytes`       | no                        | Default 1 000 000; a positive integer. A larger result becomes a tool error instead of flooding the model                                                                                                   |
+| `toolTimeoutMs`        | no                        | Default 60 000; a positive integer. How long a tool call may run. See [Timeouts and cancellation](#timeouts-and-cancellation)                                                                               |
 
 ## `mcp.define(tool)`
 
-| Field | Required | |
-|-------|----------|---|
-| `name` | yes | `[a-z0-9_]`, unique; a duplicate throws |
-| `title` | no | A non-empty display name for people; clients show it in place of `name` |
-| `description` | yes | Shown to the model |
-| `permission` | yes | A non-empty Tereo permission name, or `null` for any signed-in user. The hierarchy is the SDK's: `write` includes `read`, `admin` includes all |
-| `readOnly` | yes | Sets `readOnlyHint`. Required so an author has to state it |
-| `destructive`, `idempotent` | no | `destructiveHint`, `idempotentHint` |
-| `input` | no | `z.object(...)`, or `(ctx) => z.object(...)` (may be async) for a per-user schema. Omitted: no arguments |
-| `output` | no | `z.object(...)`, static only. The result is validated and sent as structured content too. See [Structured results](#structured-results) |
-| `handler` | yes | `(input, ctx) => value`. A string is returned as text; any other JSON value as JSON text |
-| `timeoutMs` | no | A positive integer; overrides `toolTimeoutMs` for this tool |
-| `ui` | no | `{ resourceUri, visibility? }`: links the tool to a `ui://` resource (MCP Apps). See [Resources and tool UIs](#resources-and-tool-uis) |
-| `rateLimit` | no | `{ perMinute }` (a positive integer) for the tool's own limit, or `false` for none. Unset: the server-wide limit. See [Rate limit](#rate-limit) |
+| Field                       | Required |                                                                                                                                                 |
+| --------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                      | yes      | `[a-z0-9_]`, unique; a duplicate throws                                                                                                         |
+| `title`                     | no       | A non-empty display name for people; clients show it in place of `name`                                                                         |
+| `description`               | yes      | Shown to the model                                                                                                                              |
+| `permission`                | yes      | A non-empty Tereo permission name, or `null` for any signed-in user. The hierarchy is the SDK's: `write` includes `read`, `admin` includes all  |
+| `readOnly`                  | yes      | Sets `readOnlyHint`. Required so an author has to state it                                                                                      |
+| `destructive`, `idempotent` | no       | `destructiveHint`, `idempotentHint`                                                                                                             |
+| `input`                     | no       | `z.object(...)`, or `(ctx) => z.object(...)` (may be async) for a per-user schema. Omitted: no arguments                                        |
+| `output`                    | no       | `z.object(...)`, static only. The result is validated and sent as structured content too. See [Structured results](#structured-results)         |
+| `handler`                   | yes      | `(input, ctx) => value`. A string is returned as text; any other JSON value as JSON text                                                        |
+| `timeoutMs`                 | no       | A positive integer; overrides `toolTimeoutMs` for this tool                                                                                     |
+| `ui`                        | no       | `{ resourceUri, visibility? }`: links the tool to a `ui://` resource (MCP Apps). See [Resources and tool UIs](#resources-and-tool-uis)          |
+| `rateLimit`                 | no       | `{ perMinute }` (a positive integer) for the tool's own limit, or `false` for none. Unset: the server-wide limit. See [Rate limit](#rate-limit) |
 
 `define` throws once the server has started (`router()` or `listen()` was called), and when a
 field above is out of range; the message names the tool and the field. It also throws for a static
@@ -121,13 +122,13 @@ for that request; the caller's other tools still list and run.
 
 ### `ctx`
 
-| Member | |
-|--------|---|
-| `auth` | The SDK's `AuthContext`: `userId`, `email`, `name`, `userType`, `permissions`, `clientId`, `scope`, `organizationId`, … |
-| `core` | The `CoreClient`, for lookups (groups, users) and `outbox.audit` |
-| `requestId` | Also on every log line for the call |
-| `logger` | A Pino child logger carrying `tool`, `user_id` and `request_id` |
-| `signal` | An `AbortSignal` for the call. See [Timeouts and cancellation](#timeouts-and-cancellation) |
+| Member      |                                                                                                                         |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `auth`      | The SDK's `AuthContext`: `userId`, `email`, `name`, `userType`, `permissions`, `clientId`, `scope`, `organizationId`, … |
+| `core`      | The `CoreClient`, for lookups (groups, users) and `outbox.audit`                                                        |
+| `requestId` | Also on every log line for the call                                                                                     |
+| `logger`    | A Pino child logger carrying `tool`, `user_id` and `request_id`                                                         |
+| `signal`    | An `AbortSignal` for the call. See [Timeouts and cancellation](#timeouts-and-cancellation)                              |
 
 ### Instructions and titles
 
@@ -141,14 +142,16 @@ with the tool in `tools/list` for clients to show people; the model still calls 
 ```ts
 const mcp = createTereoMcp({
   // …
-  instructions: async (ctx) => {          // ctx: auth, core, requestId, logger, signal
+  instructions: async (ctx) => {
+    // ctx: auth, core, requestId, logger, signal
     const sources = await listSourcesFor(ctx.auth.userId, ctx.signal);
     return `Query only these sources: ${sources.join(", ")}.`;
   },
 });
 ```
 
-The function runs only for `initialize` and `server/discover`, not for every message, and
+The function runs on every `initialize` (and `server/discover`) and is not rate-limited, so cache
+expensive work. It does not run for other messages, and
 `ctx.signal` aborts after 2 000 ms. If it throws, runs over or returns anything but a string, the failure
 is logged and the client is sent no instructions; the connection still works.
 
@@ -219,11 +222,15 @@ of `publicUrl` and the `allowedOrigins` passed to `createTereoMcp`, they accept 
 `listen` does on a non-loopback bind:
 
 ```ts
-import { createTereoMcp, hostHeaderValidation, originValidation } from "@tereo-io/mcp";
+import {
+  createTereoMcp,
+  hostHeaderValidation,
+  originValidation,
+} from "@tereo-io/mcp";
 
 const publicUrl = "https://mcp.example.com";
 const allowedOrigins = ["https://app.example.com"];
-const mcp = createTereoMcp({ publicUrl, allowedOrigins, /* … */ });
+const mcp = createTereoMcp({ publicUrl, allowedOrigins /* … */ });
 
 app.use(hostHeaderValidation([new URL(publicUrl).hostname]));
 app.use(originValidation(allowedOrigins));
@@ -234,10 +241,10 @@ app.use(await mcp.router());
 Without `allowedOrigins`, `listen` on a non-loopback bind checks no Origin; leave
 `originValidation` out to match.
 
-| Parameter | Each entry is | Compared with |
-|-----------|---------------|---------------|
-| `allowedHostnames` | A hostname as URL parsing writes it: lowercase, IPv6 in brackets (`mcp.example.com`, `127.0.0.1`, `[::1]`), with no scheme, port or path | The `Host` header's hostname; the port is not compared |
-| `allowedOrigins` | An http or https origin as `createTereoMcp` takes it (`https://app.example.com`), a hostname as above, or `<scheme>://*` for every origin of a non-web scheme (`moz-extension://*`) | The `Origin` header's hostname, or its scheme for a `<scheme>://*` entry; an origin entry's scheme and port are not compared |
+| Parameter          | Each entry is                                                                                                                                                                       | Compared with                                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `allowedHostnames` | A hostname as URL parsing writes it: lowercase, IPv6 in brackets (`mcp.example.com`, `127.0.0.1`, `[::1]`), with no scheme, port or path                                            | The `Host` header's hostname; the port is not compared                                                                       |
+| `allowedOrigins`   | An http or https origin as `createTereoMcp` takes it (`https://app.example.com`), a hostname as above, or `<scheme>://*` for every origin of a non-web scheme (`moz-extension://*`) | The `Origin` header's hostname, or its scheme for a `<scheme>://*` entry; an origin entry's scheme and port are not compared |
 
 Any other entry (`https://mcp.example.com` as a hostname, a port, a path, `https://*`, an empty
 string) throws when the middleware is made, with a message naming it. `hostHeaderValidation`
@@ -266,11 +273,11 @@ MCP endpoint `req.auth` is the MCP SDK's; a tool gets the `AuthContext` as `ctx.
 
 `listen`'s third parameter (type `ListenOptions`) controls shutdown:
 
-| Option | Default | |
-|--------|---------|---|
-| `signals` | `["SIGTERM", "SIGINT"]` | Signals that shut the server down. `false`: install no listeners; the host handles signals itself and calls `close()` |
-| `shutdownTimeoutMs` | `25000` | How long `close()` waits for in-flight calls before dropping their connections; also bounds `onShutdown`. A positive integer |
-| `onShutdown` | none | Runs after the server has closed, before the process exits: stop the core client, close Redis |
+| Option              | Default                 |                                                                                                                              |
+| ------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `signals`           | `["SIGTERM", "SIGINT"]` | Signals that shut the server down. `false`: install no listeners; the host handles signals itself and calls `close()`        |
+| `shutdownTimeoutMs` | `25000`                 | How long `close()` waits for in-flight calls before dropping their connections; also bounds `onShutdown`. A positive integer |
+| `onShutdown`        | none                    | Runs after the server has closed, before the process exits: stop the core client, close Redis                                |
 
 `shutdownTimeoutMs` bounds the drain and `onShutdown` separately, so a shutdown can take about
 twice that value (50 seconds by default): size a Kubernetes `terminationGracePeriodSeconds` above
@@ -284,7 +291,10 @@ second signal during shutdown exits with `1` at once. Wire it like this:
 
 ```ts
 const server = await mcp.listen(4002, undefined, {
-  onShutdown: async () => { await core.stop(); redis.disconnect(); },
+  onShutdown: async () => {
+    await core.stop();
+    redis.disconnect();
+  },
 });
 ```
 
@@ -408,7 +418,10 @@ mcp.define({
   readOnly: true,
   input: z.object({ table: z.string() }),
   output: z.object({ table: z.string(), rows: z.number().int() }),
-  handler: async ({ table }, ctx) => ({ table, rows: await countRows(table, ctx.signal) }),
+  handler: async ({ table }, ctx) => ({
+    table,
+    rows: await countRows(table, ctx.signal),
+  }),
 });
 ```
 
@@ -428,11 +441,11 @@ synchronous and cheap: no async refinements, no lookups.
 
 ## Errors
 
-| Thrown by the handler | The model sees | Logged |
-|-----------------------|----------------|--------|
-| `ToolError(message)` | `message`, as a tool error | info, outcome `tool_error` |
-| An SDK `HttpError` with status below 500 (`ForbiddenError`, `NotFoundError`, …) | Its message, as a tool error | info, outcome `tool_error` |
-| Anything else | `Internal error (request <id>)`, as a tool error | error, with `err`, outcome `internal_error` |
+| Thrown by the handler                                                           | The model sees                                   | Logged                                      |
+| ------------------------------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------- |
+| `ToolError(message)`                                                            | `message`, as a tool error                       | info, outcome `tool_error`                  |
+| An SDK `HttpError` with status below 500 (`ForbiddenError`, `NotFoundError`, …) | Its message, as a tool error                     | info, outcome `tool_error`                  |
+| Anything else                                                                   | `Internal error (request <id>)`, as a tool error | error, with `err`, outcome `internal_error` |
 
 A result over `maxResultBytes` is a tool error too (outcome `tool_error`), as is a call that runs
 past its timeout (outcome `timeout`, logged at warn) and one cancelled by a disconnect, a
@@ -479,11 +492,11 @@ logged at error.
 
 A tool can set its own limit instead:
 
-| `rateLimit` on the tool | |
-|-------------------------|---|
-| unset | The server-wide limit applies |
-| `{ perMinute }` | Its own per-user counter, under `@tereo-io/mcp:<name>:rl:<user>:<tool>`. Its calls do not count toward the server-wide limit |
-| `false` | Never limited; Redis is not touched |
+| `rateLimit` on the tool |                                                                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| unset                   | The server-wide limit applies                                                                                                |
+| `{ perMinute }`         | Its own per-user counter, under `@tereo-io/mcp:<name>:rl:<user>:<tool>`. Its calls do not count toward the server-wide limit |
+| `false`                 | Never limited; Redis is not touched                                                                                          |
 
 A tool with its own limit needs `redis` even when the server-wide `rateLimit` is `false`. The
 answer over the limit, the outcome and the Redis failure behaviour are the same as above.
@@ -502,7 +515,7 @@ const stubCore = await startStubCore();
 const mcp = createTereoMcp({
   name: "query-service",
   version: "1.0.0",
-  core,                                     // createCoreClient({ …, testMode: true })
+  core, // createCoreClient({ …, testMode: true })
   publicUrl: "https://mcp.example.com",
   allowedClients: ["claude-connector"],
   rateLimit: false,
@@ -511,10 +524,14 @@ const mcp = createTereoMcp({
 mcp.define(/* … */);
 
 const { client, close } = await createTestClient(mcp, {
-  token: "test-token-user-1|client=claude-connector|perms=query.connections.read",
+  token:
+    "test-token-user-1|client=claude-connector|perms=query.connections.read",
 });
 const { tools } = await client.listTools();
-const result = await client.callTool({ name: "list_connections", arguments: {} });
+const result = await client.callTool({
+  name: "list_connections",
+  arguments: {},
+});
 await close();
 await stubCore.close();
 ```

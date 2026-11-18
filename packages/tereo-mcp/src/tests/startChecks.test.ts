@@ -67,6 +67,29 @@ afterEach(() => {
 });
 
 describe("runStartChecks", () => {
+  it("refuses a tool whose ui.resourceUri is not a defined resource", async () => {
+    const withUi: ToolDefinition = {
+      ...tool(null),
+      name: "panel",
+      ui: { resourceUri: "ui://app/missing.html" },
+    };
+    const message = await failure(
+      runStartChecks(options(), [withUi], answering(200, metadata), [])
+    );
+    expect(message).toContain('"panel"');
+    expect(message).toContain("ui://app/missing.html");
+
+    const defined = {
+      uri: "ui://app/missing.html",
+      name: "m",
+      mimeType: "text/html",
+      read: () => ({ text: "" }),
+    };
+    await expect(
+      runStartChecks(options(), [withUi], answering(200, metadata), [defined])
+    ).resolves.toBeDefined();
+  });
+
   it("joins the public URL and the path into the resource URL", async () => {
     const state = await runStartChecks(
       options({ publicUrl: "https://mcp.example.com/" }),

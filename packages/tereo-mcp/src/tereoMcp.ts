@@ -47,14 +47,16 @@ export const createTereoMcp = (options: TereoMcpOptions): TereoMcp => {
       registry.freeze();
       const tools = registry.list();
       const resources = registry.listResources();
-      started = runStartChecks(options, tools).then((state) => ({
-        options,
-        tools,
-        resources,
-        state,
-        logger,
-        limiters: createLimiters(options, tools, logger),
-      }));
+      started = runStartChecks(options, tools, undefined, resources).then(
+        (state) => ({
+          options,
+          tools,
+          resources,
+          state,
+          logger,
+          limiters: createLimiters(options, tools, logger),
+        })
+      );
       // A failed start (core unreachable, say) is retried by the next call.
       started.catch(() => {
         started = undefined;

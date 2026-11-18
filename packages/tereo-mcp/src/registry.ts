@@ -126,6 +126,17 @@ export class ToolRegistry {
         throw new Error(`A resource needs ${key} to be a non-empty string`);
       }
     }
+    let normalised: string | undefined;
+    try {
+      normalised = new URL(resource.uri).toString();
+    } catch {
+      normalised = undefined;
+    }
+    if (normalised !== resource.uri) {
+      throw new Error(
+        `resource uri ${JSON.stringify(resource.uri)} must be an absolute, normalised URL`
+      );
+    }
     if (typeof resource.read !== "function") {
       throw new Error(`Resource "${resource.uri}" needs a read function`);
     }

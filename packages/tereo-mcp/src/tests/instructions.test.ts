@@ -141,6 +141,37 @@ describe.each(["legacy", "modern"] as const)(
       }
     );
 
+    it("logs a warning, not an error, when the server closes during the function", async () => {
+      let started!: () => void;
+      const running = new Promise<void>((resolve) => (started = resolve));
+      const { server, lines } = await serve(
+        {
+          instructions: async (ctx) => {
+            started();
+            await new Promise<void>((resolve) =>
+              ctx.signal.addEventListener("abort", () => resolve())
+            );
+            return "too late";
+          },
+        },
+        tool("echo", () => "ok")
+      );
+      const pending = connect(server.url, token, { era }).catch(
+        () => undefined
+      );
+
+      await running;
+      await server.close();
+      await pending;
+
+      expect(
+        lines.find((l) => l.msg === "MCP instructions stopped: server closing")
+      ).toMatchObject({ level: 40, user_id: "u1" });
+      expect(lines.find((l) => l.msg === "MCP instructions failed")).toBe(
+        undefined
+      );
+    });
+
     it("calls the function when the body was not parsed by the host", async () => {
       const stub = await startStubCore();
       cleanups.push(() => stub.close());

@@ -85,10 +85,12 @@ const resolveInstructions = async (
     }
     return text;
   } catch (err) {
-    logger.error(
-      { user_id: auth.userId, request_id: requestId, err },
-      "MCP instructions failed"
-    );
+    const fields = { user_id: auth.userId, request_id: requestId, err };
+    if (closing?.aborted) {
+      logger.warn(fields, "MCP instructions stopped: server closing");
+    } else {
+      logger.error(fields, "MCP instructions failed");
+    }
     return undefined;
   }
 };
@@ -245,7 +247,14 @@ export const buildServer = async (
       description: tool.description,
       annotations: annotationsOf(tool),
       ...(tool.output && { outputSchema: tool.output }),
-      ...(tool.ui && { _meta: { ui: tool.ui } }),
+      ...(tool.ui && {
+        _meta: {
+          ui: {
+            ...tool.ui,
+            ...(tool.ui.visibility && { visibility: [...tool.ui.visibility] }),
+          },
+        },
+      }),
     };
     if (schema) {
       server.registerTool(

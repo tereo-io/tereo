@@ -1,5 +1,9 @@
-import type { TereoMcpOptions, ToolDefinition } from "../types.js";
-import { serve as serveWith, tool } from "./support/serve.js";
+import type {
+  ResourceDefinition,
+  TereoMcpOptions,
+  ToolDefinition,
+} from "../types.js";
+import { serveWithResources, tool } from "./support/serve.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { fakeCore } from "./support/fakeCore.js";
 import { createTereoMcp } from "../tereoMcp.js";
@@ -13,8 +17,21 @@ afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((fn) => fn()));
 });
 
+const resourceFor = (uri: string): ResourceDefinition => ({
+  uri,
+  name: uri.replace(/\W/g, "_"),
+  mimeType: "text/html;profile=mcp-app",
+  read: () => ({ text: "<p>hi</p>" }),
+});
+
+// Every ui the tests use points at a resource defined here.
 const serve = (extra: Partial<TereoMcpOptions>, ...tools: ToolDefinition[]) =>
-  serveWith(cleanups, extra, ...tools);
+  serveWithResources(
+    cleanups,
+    extra,
+    tools,
+    ["ui://app/card.html", "ui://app/other.html"].map(resourceFor)
+  );
 
 const ui: ToolDefinition["ui"] = {
   resourceUri: "ui://app/card.html",

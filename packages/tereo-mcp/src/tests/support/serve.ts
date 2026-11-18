@@ -1,4 +1,8 @@
-import type { TereoMcpOptions, ToolDefinition } from "../../types.js";
+import type {
+  ResourceDefinition,
+  TereoMcpOptions,
+  ToolDefinition,
+} from "../../types.js";
 import { createTereoMcp } from "../../tereoMcp.js";
 import { startStubCore } from "../../testing.js";
 import type { Listening } from "../../http.js";
@@ -21,10 +25,17 @@ export const tool = (
 
 // Starts a stub core and a listening server on a loopback port; the caller
 // runs the returned cleanups (afterEach) to close both.
-export async function serve(
+export const serve = (
   cleanups: (() => Promise<void>)[],
   extra: Partial<TereoMcpOptions>,
   ...tools: ToolDefinition[]
+) => serveWithResources(cleanups, extra, tools, []);
+
+export async function serveWithResources(
+  cleanups: (() => Promise<void>)[],
+  extra: Partial<TereoMcpOptions>,
+  tools: ToolDefinition[],
+  resources: ResourceDefinition[]
 ): Promise<{
   server: Listening;
   lines: Record<string, unknown>[];
@@ -55,6 +66,7 @@ export async function serve(
     ...extra,
   });
   for (const t of tools) mcp.define(t);
+  for (const r of resources) mcp.resource(r);
   const server = await mcp.listen(0, "127.0.0.1", { signals: false });
   cleanups.push(() => server.close());
   return { server, lines, raw };

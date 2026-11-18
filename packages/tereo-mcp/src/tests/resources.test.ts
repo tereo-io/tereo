@@ -110,13 +110,48 @@ describe.each(["legacy", "modern"] as const)("resources (%s era)", (era) => {
     ]);
     const client = await connect(server.url, token, { era });
 
-    await expect(
-      client.readResource({ uri: "ui://app/card.html" })
-    ).rejects.toThrow();
+    const failure = await client
+      .readResource({ uri: "ui://app/card.html" })
+      .then(
+        () => undefined,
+        (e: unknown) => e
+      );
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain("secret db detail");
     await client.close();
 
     const logged = lines.find((l) => l.msg === "MCP resource read failed");
     expect(logged).toMatchObject({ level: 50, resource: "ui://app/card.html" });
+  });
+
+  it("refuses a uri that is not an absolute, normalised URL", () => {
+    const mcp = createTereoMcp({
+      name: "quotes",
+      version: "1.0.0",
+      core: fakeCore(),
+      publicUrl: "https://mcp.example.test",
+      allowedClients: ["claude"],
+    });
+    expect(() => mcp.resource(card({ uri: "card" }))).toThrow(
+      'resource uri "card" must be an absolute, normalised URL'
+    );
+    expect(() => mcp.resource(card({ uri: "ui://app/a b.html" }))).toThrow(
+      /normalised URL/
+    );
+  });
+
+  it("reads a resource whose uri is already normalised", async () => {
+    const { server } = await serveResources([
+      card({ uri: "ui://zeteo/panel-card.html" }),
+    ]);
+    const client = await connect(server.url, token, { era });
+
+    const res = await client.readResource({
+      uri: "ui://zeteo/panel-card.html",
+    });
+
+    expect(res.contents[0]).toMatchObject({ text: "<p>hi</p>" });
+    await client.close();
   });
 
   it("declares no resources capability when none is defined", async () => {

@@ -2,6 +2,7 @@ import type { OAuthMetadata } from "@modelcontextprotocol/server";
 import { parseOrigin } from "./validation.js";
 import type {
   ListenOptions,
+  ResourceDefinition,
   TereoMcpOptions,
   ToolDefinition,
 } from "./types.js";
@@ -191,7 +192,8 @@ const fetchMetadata = async (
 export const runStartChecks = async (
   options: TereoMcpOptions,
   tools: readonly ToolDefinition[],
-  fetchImpl: typeof fetch = fetch
+  fetchImpl: typeof fetch = fetch,
+  resources: readonly ResourceDefinition[] = []
 ): Promise<StartState> => {
   const origin = checkPublicUrl(options.publicUrl);
   const path = options.path ?? "/mcp";
@@ -224,6 +226,14 @@ export const runStartChecks = async (
   checkAllowedOrigins(options.allowedOrigins);
   checkScopes(options.scopes);
   checkPermissions(options, tools);
+  const resourceUris = new Set(resources.map((r) => r.uri));
+  for (const tool of tools) {
+    if (tool.ui && !resourceUris.has(tool.ui.resourceUri)) {
+      fail(
+        `tool "${tool.name}" has ui.resourceUri ${JSON.stringify(tool.ui.resourceUri)}, which is not the uri of a defined resource`
+      );
+    }
+  }
 
   const coreUrl =
     options.coreUrl ??
