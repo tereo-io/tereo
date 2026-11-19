@@ -48,7 +48,11 @@ const notAllowed = (message: string) =>
  * someone hands that someone a view of their whole subtree. Counted as
  * `assertHoldsTargetPermissions` counts a target (guards.ts): every scope,
  * deactivated roles included, and an organization owner or admin membership
- * as `organizations.write`. Takes no authority locks, only the hierarchy's.
+ * as `organizations.write`.
+ *
+ * Takes no per-user authority locks, only the hierarchy's: the subtree may
+ * hold up to 10,000 users, too many to lock one by one, so a grant to one of
+ * them that commits while the check runs is accepted.
  */
 const assertMayPlace = async (
   actor: Actor,
@@ -63,10 +67,7 @@ const assertMayPlace = async (
   );
   if (below.overLimit) throw limitExceeded(limits);
   const ids = [userId, ...below.rows.map((r) => r.id)];
-  const held = await db.roles.getUsersPermissionsAnywhere(ids, tx, {
-    includeInactiveRoles: true,
-    ignoreGuestFloor: true,
-  });
+  const held = await db.roles.getUsersPermissionsAnywhere(ids, tx);
   const managesOrgs = await db.organizations.hasManagingMembership(ids, tx);
   if (held.length === 0 && !managesOrgs) return;
 

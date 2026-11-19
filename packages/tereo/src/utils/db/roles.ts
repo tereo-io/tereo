@@ -781,29 +781,54 @@ export const getUserPermissionsAnywhere = async (
   await permissionsInScope(userId, "anywhere", tx, options);
 
 /**
- * The union of `getUserPermissionsAnywhere` over `userIds`. Only a user with
- * a direct role or a group membership can hold anything, so the rest are
- * skipped with one query.
+ * The union over `userIds` of `getUserPermissionsAnywhere(id, tx,
+ * { includeInactiveRoles: true, ignoreGuestFloor: true })`, in one query: what
+ * each user could act with once their roles are reactivated and any guest
+ * promoted. Mirrors `liveAssignmentsWhere` and `groupAssignmentsWhere` for
+ * the "anywhere" scope and the per-permission checks of
+ * `permissionsInScope`; `roles.test.ts` holds the two to the same answer.
  */
 export const getUsersPermissionsAnywhere = async (
   userIds: string[],
-  tx?: Prisma.TransactionClient,
-  options?: AssignmentOptions
+  tx?: Prisma.TransactionClient
 ): Promise<string[]> => {
-  const holders = await (tx ?? prisma).user.findMany({
-    where: {
-      id: { in: userIds },
-      OR: [{ userRoles: { some: {} } }, { groupMemberships: { some: {} } }],
-    },
-    select: { id: true },
-  });
-  const held = new Set<string>();
-  for (const { id } of holders) {
-    for (const p of await permissionsInScope(id, "anywhere", tx, options)) {
-      held.add(p);
-    }
-  }
-  return [...held].sort();
+  if (userIds.length === 0) return [];
+  const rows = await (tx ?? prisma).$queryRaw<{ name: string }[]>`
+    WITH assignments AS (
+      SELECT ur.role_id, ur.organization_id,
+             sa.approved_permission_ids AS approved
+      FROM "auth"."user_roles" ur
+      LEFT JOIN "core"."service_access" sa ON sa.id = ur.service_access_id
+      WHERE ur.user_id = ANY(${userIds}::uuid[])
+        AND (ur.expires_at IS NULL OR ur.expires_at > ${new Date()})
+      UNION ALL
+      SELECT gr.role_id, g.organization_id, NULL
+      FROM "auth"."group_members" gm
+      JOIN "auth"."groups" g ON g.id = gm.group_id
+      JOIN "auth"."group_roles" gr ON gr.group_id = g.id
+      WHERE gm.user_id = ANY(${userIds}::uuid[])
+        AND g.archived_at IS NULL
+        AND (
+          g.organization_id IS NULL
+          OR EXISTS (
+            SELECT 1 FROM "auth"."organization_members" om
+            WHERE om.organization_id = g.organization_id
+              AND om.user_id = gm.user_id
+          )
+        )
+    )
+    SELECT DISTINCT p.name
+    FROM assignments a
+    JOIN "auth"."roles" r ON r.id = a.role_id
+    JOIN "auth"."role_permissions" rp ON rp.role_id = r.id
+    JOIN "auth"."permissions" p ON p.id = rp.permission_id
+    WHERE r.archived_at IS NULL
+      AND r.retired_at IS NULL
+      AND p.retired_at IS NULL
+      AND (a.organization_id IS NULL OR p.org_assignable)
+      AND (a.approved IS NULL OR rp.permission_id = ANY(a.approved))
+  `;
+  return rows.map((r) => r.name).sort();
 };
 
 const permissionsInScope = async (

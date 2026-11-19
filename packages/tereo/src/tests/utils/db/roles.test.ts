@@ -521,3 +521,155 @@ describe("db.roles group-derived roles", () => {
     ).toEqual([orgA, orgB].sort());
   });
 });
+
+describe("db.roles.getUsersPermissionsAnywhere", () => {
+  const perm = async (label: string, orgAssignable = false) => {
+    const name = `${TEST_SERVICE.namespace}.reports-union.${label}${run}`;
+    const permission = await ensurePermission(name);
+    await prisma.permission.update({
+      where: { id: permission.id },
+      data: { orgAssignable },
+    });
+    return permission;
+  };
+  const roleOf = async (...permissionIds: string[]) => {
+    const role = await createTestRole();
+    await prisma.rolePermission.createMany({
+      data: permissionIds.map((permissionId) => ({
+        roleId: role.id,
+        permissionId,
+      })),
+    });
+    return role;
+  };
+  const assign = (
+    userId: string,
+    roleId: string,
+    extra: { organizationId?: string; expiresAt?: Date } = {}
+  ) => prisma.userRole.create({ data: { userId, roleId, ...extra } });
+
+  it("returns the union the per-user path gives, in one query", async () => {
+    const org = await newOrg();
+    const users: string[] = [];
+    const user = async () => {
+      const id = (await createTestUser()).id;
+      users.push(id);
+      return id;
+    };
+
+    const direct = await user();
+    await assign(direct, (await roleOf((await perm("direct")).id)).id);
+
+    const orgScoped = await user();
+    const orgOk = await perm("orgok", true);
+    const orgNo = await perm("orgno");
+    await assign(orgScoped, (await roleOf(orgOk.id, orgNo.id)).id, {
+      organizationId: org,
+    });
+
+    const viaGroups = await user();
+    await joinOrg(org, viaGroups);
+    await groupWith(
+      null,
+      [viaGroups],
+      [(await roleOf((await perm("group")).id)).id]
+    );
+    await groupWith(
+      org,
+      [viaGroups],
+      [(await roleOf((await perm("orggroup", true)).id)).id]
+    );
+    await groupWith(
+      await newOrg(),
+      [viaGroups],
+      [(await roleOf((await perm("orgout", true)).id)).id]
+    );
+    const archived = await groupWith(
+      null,
+      [viaGroups],
+      [(await roleOf((await perm("archgroup")).id)).id]
+    );
+    await db.groups.setArchived(archived.id, new Date());
+
+    const inactive = await user();
+    const inactiveRole = await roleOf((await perm("inactive")).id);
+    await prisma.role.update({
+      where: { id: inactiveRole.id },
+      data: { isActive: false },
+    });
+    await assign(inactive, inactiveRole.id);
+
+    const excluded = await user();
+    const retired = await perm("retired");
+    await prisma.permission.update({
+      where: { id: retired.id },
+      data: { retiredAt: new Date() },
+    });
+    await assign(excluded, (await roleOf(retired.id)).id);
+    const archivedRole = await roleOf((await perm("archrole")).id);
+    await prisma.role.update({
+      where: { id: archivedRole.id },
+      data: { archivedAt: new Date() },
+    });
+    await assign(excluded, archivedRole.id);
+    await assign(excluded, (await roleOf((await perm("expired")).id)).id, {
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+
+    const guestRole = await roleOf((await perm("guest", true)).id);
+    const { user: guest } = await createTestGuest({
+      organizationId: org,
+      roleIds: [guestRole.id],
+    });
+    users.push(guest.id);
+
+    const service = await user();
+    const approved = await perm("approved");
+    const unapproved = await perm("unapproved");
+    const access = await prisma.serviceAccess.create({
+      data: {
+        serviceId: TEST_SERVICE.id,
+        kind: "role",
+        target: `reports-union-${randomUUID()}`,
+        approvedPermissionIds: [approved.id],
+      },
+    });
+    await prisma.userRole.create({
+      data: {
+        userId: service,
+        roleId: (await roleOf(approved.id, unapproved.id)).id,
+        serviceAccessId: access.id,
+      },
+    });
+
+    await user();
+
+    const perUser = new Set<string>();
+    for (const id of users) {
+      for (const p of await db.roles.getUserPermissionsAnywhere(id, undefined, {
+        includeInactiveRoles: true,
+        ignoreGuestFloor: true,
+      })) {
+        perUser.add(p);
+      }
+    }
+    const union = await prisma.$transaction((tx) =>
+      db.roles.getUsersPermissionsAnywhere(users, tx)
+    );
+    const ours = (label: string) =>
+      `${TEST_SERVICE.namespace}.reports-union.${label}${run}`;
+
+    expect(union).toEqual([...perUser].sort());
+    expect(union.filter((p) => p.includes(".reports-union."))).toEqual(
+      ["direct", "orgok", "group", "orggroup", "inactive", "guest", "approved"]
+        .map(ours)
+        .sort()
+    );
+    await prisma.userRole.deleteMany({ where: { serviceAccessId: access.id } });
+    await prisma.serviceAccess.delete({ where: { id: access.id } });
+  });
+
+  it("returns nothing for no users", async () => {
+    expect(await db.roles.getUsersPermissionsAnywhere([])).toEqual([]);
+  });
+});
