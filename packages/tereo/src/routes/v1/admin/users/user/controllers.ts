@@ -3,7 +3,6 @@ import { endSession, endUserSessions } from "../../../../../utils/sessions.js";
 import { recordSessionsRevoked } from "../../../../../utils/sessionEvents.js";
 import { setRateLimitTx } from "../../../../../utils/rateLimitOverride.js";
 import { assertAdminRemains } from "../../../../../utils/adminGuard.js";
-import { formatAdminUser } from "../../../../../utils/transformers.js";
 import { logAuditTx, emitTx } from "../../../../../utils/outbox.js";
 import type { Prisma } from "../../../../../utils/db/prisma.js";
 import { validateUser } from "../../../../../utils/auth.js";
@@ -19,6 +18,10 @@ import {
   updateUserProfileTx,
   type UserRow,
 } from "../../../../../utils/userLifecycle.js";
+import {
+  formatAdminUser,
+  formatReportsTo,
+} from "../../../../../utils/transformers.js";
 import {
   validateBody,
   validateParams,
@@ -68,6 +71,10 @@ export const getUser = async (req: Request, res: Response) => {
     ...formatAdminUser(user),
     managedBy: await managerOf(user),
     scimExcluded: await scimExclusionOf(user.id),
+    reportsTo: formatReportsTo(
+      user.reportsToId ? await db.users.get(user.reportsToId) : null
+    ),
+    directReportCount: await db.reports.countDirect(user.id),
   });
 };
 

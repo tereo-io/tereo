@@ -2,10 +2,14 @@
 // @module-tag auth
 import { ensureDefaultOrganization } from "../../utils/defaultOrganization.js";
 import { createAdminUser, createTestUser } from "../support/auth/users.js";
-import { REPORTS_LIMITS, setReportsTo } from "../../utils/reportsTo.js";
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { UnprocessableEntityError } from "../../utils/errors.js";
 import { prisma } from "../../utils/db/prisma.js";
+import {
+  listReports,
+  REPORTS_LIMITS,
+  setReportsTo,
+} from "../../utils/reportsTo.js";
 
 const userIds: string[] = [];
 let actor: { userId: string; email: string };
@@ -77,5 +81,52 @@ describe("setReportsTo", () => {
       maxDepth: 2,
     });
     expect(view.reportsTo?.id).toBe(manager);
+  });
+});
+
+describe("listReports", () => {
+  /** D <- C <- {B, E}, and A <- B: four below D, three levels deep. */
+  const tree = async () => {
+    const [d, c, b, e, a] = [
+      await user(),
+      await user(),
+      await user(),
+      await user(),
+      await user(),
+    ];
+    for (const [id, reportsToId] of [
+      [c, d],
+      [b, c],
+      [e, c],
+      [a, b],
+    ]) {
+      await prisma.user.update({ where: { id }, data: { reportsToId } });
+    }
+    return d;
+  };
+
+  it.each([
+    ["more users", { maxUsers: 3, maxDepth: 64 }],
+    ["more levels", { maxUsers: 100, maxDepth: 2 }],
+  ])(
+    "refuses with reports_limit_exceeded when the tree holds %s than the limit",
+    async (_label, limits) => {
+      const top = await tree();
+      const attempt = listReports(top, { transitive: true }, limits);
+      await expect(attempt).rejects.toBeInstanceOf(UnprocessableEntityError);
+      await expect(attempt).rejects.toMatchObject({
+        code: "reports_limit_exceeded",
+      });
+    }
+  );
+
+  it("allows a tree exactly at the bounds", async () => {
+    const top = await tree();
+    const rows = await listReports(
+      top,
+      { transitive: true },
+      { maxUsers: 4, maxDepth: 3 }
+    );
+    expect(rows).toHaveLength(4);
   });
 });

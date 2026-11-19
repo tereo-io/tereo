@@ -3,6 +3,7 @@ import emailVerificationRouter from "./email-verification/index.js";
 import identityInvitesRouter from "./identity-invites/index.js";
 import identitiesRouter from "./identities/index.js";
 import reportsToRouter from "./reports-to/index.js";
+import reportsRouter from "./reports/index.js";
 import promoteRouter from "./promote/index.js";
 import groupsRouter from "./groups/index.js";
 import scimRouter from "./scim/index.js";
@@ -29,6 +30,7 @@ userRouter.use("/email-verification", emailVerificationRouter);
 userRouter.use("/promote", promoteRouter);
 userRouter.use("/scim", scimRouter);
 userRouter.use("/reports-to", reportsToRouter);
+userRouter.use("/reports", reportsRouter);
 
 userRouter.delete(
   "/sessions/all",

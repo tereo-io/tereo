@@ -6,6 +6,7 @@ import { SYSTEM_USER_ID } from "../definitions/index.js";
 import { globalGrantablePermissions } from "./grants.js";
 import type { Actor, UserRow } from "./userLifecycle.js";
 import { hasPermission } from "./permissions.js";
+import type { ReportRow } from "./db/reports.js";
 import type { Prisma } from "./db/prisma.js";
 import db from "./db/index.js";
 import {
@@ -28,6 +29,12 @@ export const REPORTS_LIMITS: ReportsLimits = {
   maxUsers: 10_000,
   maxDepth: 64,
 };
+
+const limitExceeded = (limits: ReportsLimits) =>
+  new UnprocessableEntityError(
+    "reports_limit_exceeded",
+    `More than ${limits.maxUsers.toLocaleString("en-US")} users or ${limits.maxDepth} levels report to this user`
+  );
 
 const MANAGES_ORGS = "organizations.write";
 
@@ -54,12 +61,7 @@ const assertMayPlace = async (
     { transitive: true, ...limits },
     tx
   );
-  if (below.overLimit) {
-    throw new UnprocessableEntityError(
-      "reports_limit_exceeded",
-      `More than ${limits.maxUsers} users or ${limits.maxDepth} levels report to this user`
-    );
-  }
+  if (below.overLimit) throw limitExceeded(limits);
   const ids = [userId, ...below.rows.map((r) => r.id)];
   const held = await db.roles.getUsersPermissionsAnywhere(ids, tx, {
     includeInactiveRoles: true,
@@ -80,6 +82,17 @@ const assertMayPlace = async (
       `You cannot place under another user an organization owner or admin, or someone reporting to them, without ${MANAGES_ORGS}`
     );
   }
+};
+
+/** Direct reports, or everyone below; refused, never cut, past the limits. */
+export const listReports = async (
+  userId: string,
+  opts: { transitive: boolean },
+  limits: ReportsLimits = REPORTS_LIMITS
+): Promise<ReportRow[]> => {
+  const below = await db.reports.listBelow(userId, { ...opts, ...limits });
+  if (below.overLimit) throw limitExceeded(limits);
+  return below.rows;
 };
 
 const auditChangeTx = async (
