@@ -150,6 +150,25 @@ export const formatUser = (user: {
   updatedAt: user.updatedAt.toISOString(),
 });
 
+export type ReportsToUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  isActive: boolean;
+};
+
+export const formatReportsTo = (
+  user: ReportsToUser | null
+): ReportsToUser | null =>
+  user === null
+    ? null
+    : {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        isActive: user.isActive,
+      };
+
 export const formatAdminUser = (
   user: Parameters<typeof formatUser>[0] & { rateLimitPerSecond: number | null }
 ) => ({ ...formatUser(user), rateLimitPerSecond: user.rateLimitPerSecond });

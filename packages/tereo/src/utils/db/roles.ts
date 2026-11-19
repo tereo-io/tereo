@@ -780,6 +780,32 @@ export const getUserPermissionsAnywhere = async (
 ): Promise<string[]> =>
   await permissionsInScope(userId, "anywhere", tx, options);
 
+/**
+ * The union of `getUserPermissionsAnywhere` over `userIds`. Only a user with
+ * a direct role or a group membership can hold anything, so the rest are
+ * skipped with one query.
+ */
+export const getUsersPermissionsAnywhere = async (
+  userIds: string[],
+  tx?: Prisma.TransactionClient,
+  options?: AssignmentOptions
+): Promise<string[]> => {
+  const holders = await (tx ?? prisma).user.findMany({
+    where: {
+      id: { in: userIds },
+      OR: [{ userRoles: { some: {} } }, { groupMemberships: { some: {} } }],
+    },
+    select: { id: true },
+  });
+  const held = new Set<string>();
+  for (const { id } of holders) {
+    for (const p of await permissionsInScope(id, "anywhere", tx, options)) {
+      held.add(p);
+    }
+  }
+  return [...held].sort();
+};
+
 const permissionsInScope = async (
   userId: string,
   scope: AssignmentScope,

@@ -12,4 +12,9 @@ describe("hasPermission", () => {
     expect(hasPermission(["services.read"], "services.approve")).toBe(false);
     expect(hasPermission(["webhooks.emit"], "webhooks.read")).toBe(false);
   });
+
+  it("grants users.reports.write by users.admin, not by users.write", () => {
+    expect(hasPermission(["users.write"], "users.reports.write")).toBe(false);
+    expect(hasPermission(["users.admin"], "users.reports.write")).toBe(true);
+  });
 });

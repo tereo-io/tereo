@@ -52,6 +52,10 @@ const authEvents: EventTypeDefinition[] = [
     description: "User role assignments changed",
   },
   {
+    eventType: "auth.user.reports-to-changed",
+    description: "Who a user reports to was set, changed or cleared",
+  },
+  {
     eventType: "auth.user.password-changed",
     description: "User changed their own password",
   },

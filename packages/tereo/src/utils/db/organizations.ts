@@ -261,15 +261,19 @@ export const getMembership = async (
 };
 
 /**
- * Whether the user is an `owner` or `admin` member of any organization,
- * inactive or archived ones included: they can be brought back.
+ * Whether the user, or any of several users, is an `owner` or `admin` member
+ * of any organization, inactive or archived ones included: they can be
+ * brought back.
  */
 export const hasManagingMembership = async (
-  userId: string,
+  userId: string | string[],
   tx?: Prisma.TransactionClient
 ): Promise<boolean> => {
   const row = await (tx ?? prisma).organizationMember.findFirst({
-    where: { userId, memberRole: { in: ["owner", "admin"] } },
+    where: {
+      userId: typeof userId === "string" ? userId : { in: userId },
+      memberRole: { in: ["owner", "admin"] },
+    },
     select: { id: true },
   });
   return row !== null;
