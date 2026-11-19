@@ -4732,7 +4732,7 @@ paths:
       tags:
         - Admin - Users
       summary: Get user by ID
-      description: Returns a user, and what manages it when the admin API cannot change it
+      description: Returns a user, and what manages it when the admin API cannot change it, who they report to (`reportsTo`) and how many users report directly to them (`directReportCount`)
       operationId: getAdminUser
       security:
         - BearerAuth:
@@ -4902,6 +4902,184 @@ paths:
         '403':
           $ref: '#/components/responses/ForbiddenResponse'
           description: Forbidden - missing users.read permission
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/users/{id}/reports:
+    get:
+      tags:
+        - Admin - Users
+      summary: List users who report to a user
+      description: |
+        Returns the users who report to this one: the direct reports, or with `transitive=true` everyone
+        below them as well, ordered by depth (1 is a direct report) and then email. Deactivated users are
+        listed and the chain passes through them.
+
+        The response is not paginated, on purpose (`nextCursor` is always `null`): a caller needs the
+        whole set or a refusal, so it fails closed. A tree with more than 10,000 users or 64 levels below
+        the user is `422 reports_limit_exceeded`, never a truncated list.
+      operationId: listAdminUserReports
+      security:
+        - BearerAuth:
+            - users.read
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+        - name: transitive
+          in: query
+          required: false
+          description: '`true` lists everyone below the user; `false` (default) only direct reports.'
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: The users below the user
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserReportsResponse'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing users.read permission
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '422':
+          description: |
+            `reports_limit_exceeded`: more than 10,000 users or 64 levels are below the user, so the answer
+            would be partial. Nothing is returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    const: reports_limit_exceeded
+                  error_description:
+                    type: string
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+  /v1/admin/users/{id}/reports-to:
+    put:
+      tags:
+        - Admin - Users
+      summary: Set who a user reports to
+      description: |
+        Makes the user report to another user, replacing any earlier choice. A user reports to at most one
+        user, globally (not per organization), and nothing but this route and `DELETE` changes it:
+        deactivation, reactivation, SCIM deletion and guest promotion or expiry keep it.
+
+        Refused with `400`: `reports_to_cycle` (including a user reporting to themselves or to anyone
+        below them), `reports_to_not_allowed` (the system user or a service account on either side, or a
+        guest as manager), `system_user`, `unknown_user`. Deactivated users may be on either side.
+
+        Authority guard: placing someone under a manager decides who may widen someone's row access in
+        apps that let a manager see the records of everyone below them, so the caller's global permissions
+        (global roles, cut down to a delegated token's ceiling) must cover every permission held in any
+        scope, deactivated roles included, by the user and by everyone below them. A target holding an
+        organization owner or admin membership also needs `organizations.write`. Otherwise `403`, naming
+        the lacking permissions. A change over the 10,000-user or 64-level bound is
+        `422 reports_limit_exceeded`; the check is never skipped.
+
+        Setting the value it already has changes nothing: no audit entry and no event. A change records an
+        audit entry and emits an `auth.user.reports-to-changed` webhook event.
+      operationId: setAdminUserReportsTo
+      security:
+        - BearerAuth:
+            - users.reports.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetReportsToRequest'
+      responses:
+        '200':
+          description: The user's reporting line after the change
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserReportsTo'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing users.reports.write, or the caller lacks permissions held by the user or anyone below them (the error names them)
+        '404':
+          $ref: '#/components/responses/NotFoundResponse'
+        '422':
+          description: |
+            `reports_limit_exceeded`: more than 10,000 users or 64 levels are below the user, so the answer
+            would be partial. Nothing is returned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    const: reports_limit_exceeded
+                  error_description:
+                    type: string
+        '429':
+          $ref: '#/components/responses/RateLimitResponse'
+        '500':
+          $ref: '#/components/responses/ServerErrorResponse'
+    delete:
+      tags:
+        - Admin - Users
+      summary: Clear who a user reports to
+      description: |
+        Removes the user's reporting line; `204` also when none was set. Not subject to the authority guard
+        on `PUT`. A change records an audit entry and emits an `auth.user.reports-to-changed` event.
+      operationId: clearAdminUserReportsTo
+      security:
+        - BearerAuth:
+            - users.reports.write
+      parameters:
+        - $ref: '#/components/parameters/UserIdParam'
+      responses:
+        '204':
+          description: Cleared
+          headers:
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/X-RateLimit-Limit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/X-RateLimit-Remaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/X-RateLimit-Reset'
+        '401':
+          $ref: '#/components/responses/UnauthorizedResponse'
+        '403':
+          $ref: '#/components/responses/ForbiddenResponse'
+          description: Forbidden - missing users.reports.write permission
         '404':
           $ref: '#/components/responses/NotFoundResponse'
         '429':
@@ -18052,6 +18230,60 @@ webhooks:
                             type: string
                             format: uuid
                           description: The user's role ids after the change
+      responses:
+        2XX:
+          description: Any 2xx response acknowledges the delivery; anything else is retried.
+  auth.user.reports-to-changed:
+    post:
+      tags:
+        - Admin - Users
+      summary: User reporting line changed
+      description: Fired when a user's reports-to is set, changed or cleared by an admin. Not fired when the value does not change. Emitted under the default organization; read with `users.read`.
+      operationId: webhookUserReportsToChanged
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/WebhookIdHeader'
+        - $ref: '#/components/parameters/WebhookEventHeader'
+        - $ref: '#/components/parameters/WebhookTimestampHeader'
+        - $ref: '#/components/parameters/WebhookSignatureHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/OrganizationWebhookEvent'
+                - type: object
+                  properties:
+                    eventType:
+                      const: auth.user.reports-to-changed
+                    entityType:
+                      const: User
+                    data:
+                      type: object
+                      required:
+                        - userId
+                        - email
+                        - reportsToId
+                        - previousReportsToId
+                      properties:
+                        userId:
+                          type: string
+                          format: uuid
+                        email:
+                          type: string
+                        reportsToId:
+                          type:
+                            - string
+                            - 'null'
+                          format: uuid
+                          description: Who the user reports to after the change, or `null`
+                        previousReportsToId:
+                          type:
+                            - string
+                            - 'null'
+                          format: uuid
+                          description: Who the user reported to before, or `null`
       responses:
         2XX:
           description: Any 2xx response acknowledges the delivery; anything else is retried.
@@ -33466,6 +33698,25 @@ components:
           type: string
           format: uri
           description: The provider's authorization endpoint. Navigate the browser there.
+    ReportsToUser:
+      type: object
+      required:
+        - id
+        - email
+        - name
+        - isActive
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type:
+            - string
+            - 'null'
+        isActive:
+          type: boolean
     AdminUserDetail:
       allOf:
         - $ref: '#/components/schemas/AdminUser'
@@ -33473,7 +33724,18 @@ components:
           required:
             - managedBy
             - scimExcluded
+            - reportsTo
+            - directReportCount
           properties:
+            reportsTo:
+              description: Who the user reports to (`PUT /v1/admin/users/{id}/reports-to`), or `null`
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/ReportsToUser'
+            directReportCount:
+              type: integer
+              minimum: 0
+              description: How many users report directly to this one, deactivated included
             scimExcluded:
               description: |
                 The provider whose SCIM connection an admin unlinked the user from, or
@@ -33544,6 +33806,78 @@ components:
           format: uuid
         name:
           type: string
+    UserReport:
+      type: object
+      required:
+        - id
+        - email
+        - name
+        - isActive
+        - userType
+        - reportsToId
+        - depth
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+        name:
+          type:
+            - string
+            - 'null'
+        isActive:
+          type: boolean
+        userType:
+          type: string
+          enum:
+            - human
+            - service_account
+            - guest
+        reportsToId:
+          type: string
+          format: uuid
+          description: The user this one reports to directly
+        depth:
+          type: integer
+          minimum: 1
+          description: 1 for a direct report of the user asked about, 2 for a report's report, and so on
+    UserReportsResponse:
+      type: object
+      required:
+        - data
+        - nextCursor
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserReport'
+        nextCursor:
+          type: 'null'
+          description: Always `null`; the list is never paginated
+    SetReportsToRequest:
+      type: object
+      required:
+        - userId
+      properties:
+        userId:
+          type: string
+          format: uuid
+          description: The user to report to
+    UserReportsTo:
+      type: object
+      required:
+        - userId
+        - reportsTo
+      properties:
+        userId:
+          type: string
+          format: uuid
+        reportsTo:
+          description: Who the user reports to, or `null`
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/ReportsToUser'
     UserOrgGroupRoleAssignment:
       description: A live role the user holds through a live group of an organization, counted only within that organization and only while the user is a member there.
       allOf:

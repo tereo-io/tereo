@@ -772,8 +772,9 @@ everything and `x.write` covers `x.read`). Anything beyond is a 403 naming the p
 | `POST /v1/admin/roles/:id/duplicate`                    | Every unretired permission of the source role                                      |
 | `POST /v1/admin/services/:id/access/approve`            | The permissions of each requested role the service account does not already hold   |
 | `PUT /v1/admin/organizations/:id/members/:userId/roles` | The permissions of each role the member does not already hold in that organization |
+| `PUT /v1/admin/users/:id/reports-to`                    | Every permission the user and everyone below them hold, in any scope ([Reporting lines](#reporting-lines)) |
 
-The first four grant globally, so they count only the caller's **global** permissions
+The first four, and the reporting-line check, grant globally, so they count only the caller's **global** permissions
 (`globalGrantablePermissions` in `utils/grants.ts`: global roles, cut down to a delegated token's
 ceiling) — not the org-scoped roles an organization token also carries, which reach only that
 organization. The organization route counts what the caller holds there.
@@ -863,6 +864,53 @@ organization. Userinfo also carries a `groups` claim (`id`, `slug`, `name`, `org
 user's active global groups plus the token's organization's while it is active and the user still a
 member, for the callers that get `roles`, except that a `delegated` token gets `groups` (only with
 the `account` or `admin` area, an empty list otherwise) and an empty `roles`. For a guest, inert roles are left out ([Guest users](#guest-users)).
+
+## Reporting lines
+
+A user reports to at most one other user (`reportsTo`, nullable). Apps such as Zeteo read the lines
+to let a manager see the records of everyone below them; core only stores and serves them.
+
+- **Global, not per organization.** Users are global (`auth.users`; organizations are memberships), so a manager and a
+  report may share no organization.
+- **Who.** Neither side may be the system user or a `service_account`, and the manager may not be a
+  `guest` (a guest may report to someone): `400 reports_to_not_allowed`. Deactivated users may be on
+  either side. The system user is `400 system_user`, an unknown manager `400 unknown_user`.
+- **No loops.** A user reporting to themselves or to anyone below them is `400 reports_to_cycle`,
+  including two changes made at once that would together close a loop: only one commits.
+- **Lifecycle.** Only an explicit admin change sets or clears it. Deactivating or reactivating
+  a user, a SCIM `DELETE`, guest promotion and guest expiry leave the line as it was, both for the
+  user and for their reports. A SCIM-managed user can have one too: SCIM does not own it, and its
+  enterprise `manager` attribute is not read yet.
+
+| Route | Permission | Does |
+| --- | --- | --- |
+| `PUT /v1/admin/users/:id/reports-to` `{ userId }` | `users.reports.write` | Set who the user reports to; `200 { userId, reportsTo }` |
+| `DELETE /v1/admin/users/:id/reports-to` | `users.reports.write` | Clear it; `204`, also when none was set; not checked by the authority guard |
+| `GET /v1/admin/users/:id/reports?transitive=true\|false` | `users.read` | Who reports to the user, directly or with `transitive=true` everyone below, ordered by depth then email; `{ data, nextCursor: null }` |
+| `GET /v1/admin/users/:id` | `users.read` | Also carries `reportsTo` and `directReportCount` |
+
+**Permission.** `users.reports.write` ("Write Reporting Lines") is global-only (not org-assignable).
+`users.write` does not include it; `admin` and `users.admin` do, so it is inside the `core:admin` scope
+ceiling. The reads need `users.read`, which the `user_resolver` role carries.
+
+**Authority guard.** Placing someone under a manager is a proxy for "may this caller widen someone's
+row access in apps", because apps let a manager see the records of everyone below them. So `PUT`
+needs the caller's **global** permissions (global roles, cut down to a delegated token's ceiling) to
+cover every permission held, in any scope and deactivated roles included, by the user and by
+everyone transitively below them; a target holding an organization owner or admin membership also
+needs `organizations.write`. Otherwise `403`, naming the lacking permissions ([Granting: only what you hold](#granting-only-what-you-hold)).
+A tree over the bound below is `422 reports_limit_exceeded`: the check is never skipped. Clearing
+is not checked.
+
+**Bounds, and why the read is not paginated.** `GET …/reports` returns the whole set on purpose
+(`nextCursor` is always `null`): callers need all of it or a refusal, so they fail closed. It
+includes deactivated users and passes through them. More than **10,000** users or **64** levels
+below the user is `422 reports_limit_exceeded`, never a truncated list.
+
+**Audit and events.** A change writes an audit entry (`UPDATE`, `User`, `changes.reportsToId`,
+`metadata.action: reports_to_changed`) and emits `auth.user.reports-to-changed` with
+`{ userId, email, reportsToId, previousReportsToId }` (the ids `null` when unset) under the default
+organization. Setting the value it already has is not a change: no entry, no event.
 
 ## Guest users
 
