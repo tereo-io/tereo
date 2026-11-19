@@ -43,7 +43,7 @@ describe("db.reports", () => {
     await link(rep.id, boss.id);
     await expect(
       prisma.user.delete({ where: { id: boss.id } })
-    ).rejects.toThrow();
+    ).rejects.toThrow(/users_reports_to_id_fkey/);
   });
 
   it("chainAbove walks to the top", async () => {
@@ -110,5 +110,32 @@ describe("db.reports", () => {
       maxDepth: 2,
     });
     expect(res.overLimit).toBe(true);
+  });
+
+  it("listBelow is not over the limit exactly at maxUsers", async () => {
+    const boss = await mkUser("eu-boss");
+    for (const l of ["1", "2", "3"]) {
+      const r = await mkUser(`eu-r${l}`);
+      await link(r.id, boss.id);
+    }
+    const res = await db.reports.listBelow(boss.id, {
+      ...limits,
+      maxUsers: 3,
+    });
+    expect(res.overLimit).toBe(false);
+    expect(res.rows).toHaveLength(3);
+  });
+
+  it("listBelow is not over the limit exactly at maxDepth", async () => {
+    const chain = [];
+    for (const l of ["0", "1", "2", "3"]) chain.push(await mkUser(`ed-${l}`));
+    for (let i = 1; i < chain.length; i++)
+      await link(chain[i]!.id, chain[i - 1]!.id);
+    const res = await db.reports.listBelow(chain[0]!.id, {
+      ...limits,
+      maxDepth: 3,
+    });
+    expect(res.overLimit).toBe(false);
+    expect(res.rows.map((r) => r.depth)).toEqual([1, 2, 3]);
   });
 });

@@ -49,6 +49,7 @@ export const chainAbove = async (
  * Users below `userId`, whatever their is_active or user_type, so a
  * deactivated user does not cut the tree. Fetches one row past `maxUsers` and
  * recurses one level past `maxDepth` to tell a full tree from a cut one.
+ * `maxDepth` is ignored when `transitive` is false.
  */
 export const listBelow = async (
   userId: string,
@@ -57,6 +58,8 @@ export const listBelow = async (
 ): Promise<{ rows: ReportRow[]; overLimit: boolean }> => {
   const db = tx ?? prisma;
   const levels = opts.transitive ? opts.maxDepth + 1 : 1;
+  // No ORDER BY in SQL: it would force the whole recursion before the LIMIT
+  // applies, so the bound would cap the result but not the work.
   const fetched = await db.$queryRaw<ReportRow[]>`
     WITH RECURSIVE below AS (
       SELECT u.id, u.email, u.name, u.is_active, u.user_type, u.reports_to_id,
@@ -73,7 +76,6 @@ export const listBelow = async (
     SELECT id, email, name, is_active AS "isActive", user_type AS "userType",
            reports_to_id AS "reportsToId", depth::int AS depth
     FROM below
-    ORDER BY depth, email
     LIMIT ${opts.maxUsers + 1}
   `;
   const tooDeep =
@@ -81,6 +83,11 @@ export const listBelow = async (
   const tooMany = fetched.length > opts.maxUsers;
   const rows = fetched
     .filter((r) => r.depth <= opts.maxDepth || !opts.transitive)
+    .sort(
+      (a, b) =>
+        a.depth - b.depth ||
+        (a.email < b.email ? -1 : a.email > b.email ? 1 : 0)
+    )
     .slice(0, opts.maxUsers);
   return { rows, overLimit: tooDeep || tooMany };
 };
