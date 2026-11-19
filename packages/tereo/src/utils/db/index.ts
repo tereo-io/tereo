@@ -36,6 +36,7 @@ import * as clients from "./clients.js";
 import * as consent from "./consent.js";
 import * as buckets from "./buckets.js";
 import * as objects from "./objects.js";
+import * as reports from "./reports.js";
 import * as groups from "./groups.js";
 import * as outbox from "./outbox.js";
 import * as scopes from "./scopes.js";
@@ -71,6 +72,7 @@ export default {
   userLinkTokens,
   permissions,
   refreshTokens,
+  reports,
   roles,
   scim,
   scimGroups,

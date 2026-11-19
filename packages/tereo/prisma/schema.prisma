@@ -108,6 +108,11 @@ model User {
   // False while the password is one someone else chose (an invite's initial
   // password, an admin's): promoting a guest is refused until they set their own.
   passwordSetByUser      Boolean   @default(true) @map("password_set_by_user")
+  // Who this user reports to; global, not per organization.
+  reportsToId            String?   @map("reports_to_id") @db.Uuid
+
+  reportsTo User?  @relation("UserReportsTo", fields: [reportsToId], references: [id], onDelete: Restrict)
+  reports   User[] @relation("UserReportsTo")
 
   authCodes               AuthorizationCode[]
   refreshTokens           RefreshToken[]
@@ -184,6 +189,7 @@ model User {
   @@index([isActive])
   @@index([createdAt])
   @@index([userType])
+  @@index([reportsToId])
   @@map("users")
   @@schema("auth")
 }
