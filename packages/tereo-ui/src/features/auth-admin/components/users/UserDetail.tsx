@@ -22,6 +22,7 @@ import useUserRoles from "../../api/users/useUserRoles";
 import useDocumentTitle from "@/hooks/useDocumentTitle";
 import EditUserButton from "./buttons/EditUserButton";
 import { PageHeader } from "@/components/PageHeader";
+import { UserReportsCard } from "./UserReportsCard";
 import { formatDateTime } from "@/utils/formatDate";
 import { Link, useParams } from "react-router-dom";
 import useUser from "../../api/users/useUser";
@@ -490,6 +491,7 @@ export const UserDetail = () => {
               <EmptyState>Not in any group</EmptyState>
             )}
           </Card>
+          <UserReportsCard user={user} />
           <TagCard
             title="Permissions"
             emptyText="No permissions"

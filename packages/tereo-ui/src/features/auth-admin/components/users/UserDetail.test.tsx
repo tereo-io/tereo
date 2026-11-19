@@ -38,6 +38,8 @@ const person: UserDetailData = {
   managedBy: null,
   scimExcluded: null,
   rateLimitPerSecond: null,
+  reportsTo: null,
+  directReportCount: 0,
 };
 
 const account: UserDetailData = {
