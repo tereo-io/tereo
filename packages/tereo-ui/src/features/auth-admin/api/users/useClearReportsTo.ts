@@ -20,7 +20,7 @@ const useClearReportsTo = () => {
       });
       if (variables.previousManagerId) {
         await queryClient.invalidateQueries({
-          queryKey: ["users", variables.previousManagerId, "reports"],
+          queryKey: ["users", variables.previousManagerId],
         });
       }
       toast.success("Reporting line removed");

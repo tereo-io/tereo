@@ -10,7 +10,9 @@ export const UserReportsCard = ({ user }: { user: UserDetail }) => {
   const { hasPermission } = useAuth();
   const { data: reports } = useUserReports(user.id);
   const canChange =
-    hasPermission("users.reports.write") && user.userType !== "service_account";
+    hasPermission("users.reports.write") &&
+    user.userType !== "service_account" &&
+    user.managedBy?.kind !== "system";
   const manager = user.reportsTo;
 
   const directReports = reports?.length ? (

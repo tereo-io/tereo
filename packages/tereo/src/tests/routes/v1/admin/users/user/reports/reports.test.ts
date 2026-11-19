@@ -107,7 +107,7 @@ describe("GET /v1/admin/users/:id/reports", () => {
     expect(res.body.error).toBe("invalid_request");
   });
 
-  it("a token with group_resolver only is 403", async () => {
+  it("a token carrying only groups.read is 403", async () => {
     const token = await getTestPrincipalToken({
       permissions: ["groups.read"],
     });

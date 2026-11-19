@@ -24,11 +24,11 @@ const useSetReportsTo = () => {
         queryKey: ["users", variables.id],
       });
       await queryClient.invalidateQueries({
-        queryKey: ["users", variables.managerId, "reports"],
+        queryKey: ["users", variables.managerId],
       });
       if (variables.previousManagerId) {
         await queryClient.invalidateQueries({
-          queryKey: ["users", variables.previousManagerId, "reports"],
+          queryKey: ["users", variables.previousManagerId],
         });
       }
       toast.success("Reporting line updated");

@@ -4986,8 +4986,9 @@ paths:
         deactivation, reactivation, SCIM deletion and guest promotion or expiry keep it.
 
         Refused with `400`: `reports_to_cycle` (including a user reporting to themselves or to anyone
-        below them), `reports_to_not_allowed` (the system user or a service account on either side, or a
-        guest as manager), `system_user`, `unknown_user`. Deactivated users may be on either side.
+        below them), `system_user` (the user is the system user), `reports_to_not_allowed` (the system
+        user as manager, a service account on either side, or a guest as manager), `unknown_user`.
+        Deactivated users may be on either side.
 
         Authority guard: placing someone under a manager decides who may widen someone's row access in
         apps that let a manager see the records of everyone below them, so the caller's global permissions
@@ -5075,6 +5076,9 @@ paths:
               $ref: '#/components/headers/X-RateLimit-Remaining'
             X-RateLimit-Reset:
               $ref: '#/components/headers/X-RateLimit-Reset'
+        '400':
+          $ref: '#/components/responses/BadRequestResponse'
+          description: '`system_user` (the user is the system user), or an id that is not a UUID'
         '401':
           $ref: '#/components/responses/UnauthorizedResponse'
         '403':

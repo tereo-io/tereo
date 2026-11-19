@@ -872,9 +872,10 @@ to let a manager see the records of everyone below them; core only stores and se
 
 - **Global, not per organization.** Users are global (`auth.users`; organizations are memberships), so a manager and a
   report may share no organization.
-- **Who.** Neither side may be the system user or a `service_account`, and the manager may not be a
-  `guest` (a guest may report to someone): `400 reports_to_not_allowed`. Deactivated users may be on
-  either side. The system user is `400 system_user`, an unknown manager `400 unknown_user`.
+- **Who.** The system user cannot be given or cleared a manager (`400 system_user`), nor be one
+  (`400 reports_to_not_allowed`). A `service_account` may be on neither side, and the manager may not be
+  a `guest` (a guest may report to someone): `400 reports_to_not_allowed`. Deactivated users may be on
+  either side. An unknown manager is `400 unknown_user`.
 - **No loops.** A user reporting to themselves or to anyone below them is `400 reports_to_cycle`,
   including two changes made at once that would together close a loop: only one commits.
 - **Lifecycle.** Only an explicit admin change sets or clears it. Deactivating or reactivating
@@ -900,7 +901,9 @@ cover every permission held, in any scope and deactivated roles included, by the
 everyone transitively below them; a target holding an organization owner or admin membership also
 needs `organizations.write`. Otherwise `403`, naming the lacking permissions ([Granting: only what you hold](#granting-only-what-you-hold)).
 A tree over the bound below is `422 reports_limit_exceeded`: the check is never skipped. Clearing
-is not checked.
+is not checked. The guard compares permissions, not data: a holder of `users.reports.write` can
+still place under themselves any user holding no more than they do, and so see that user's records
+in apps. `users.reports.write` is therefore itself a sensitive grant.
 
 **Bounds, and why the read is not paginated.** `GET …/reports` returns the whole set on purpose
 (`nextCursor` is always `null`): callers need all of it or a refusal, so they fail closed. It

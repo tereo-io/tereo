@@ -147,6 +147,14 @@ describe("UserReportsCard", () => {
     expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
   });
 
+  it("hides Change and Clear for the system user", async () => {
+    renderCard({ ...person, managedBy: { kind: "system" }, reportsTo: boss });
+
+    await screen.findByText("Reporting line");
+    expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Clear" })).toBeNull();
+  });
+
   it("sets the manager from the picker", async () => {
     const user = userEvent.setup();
     renderCard(person);
