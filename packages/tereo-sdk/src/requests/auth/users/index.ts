@@ -1,9 +1,21 @@
 import { tryHandleRequest } from "../../../utils/tryHandleRequest.js";
 import { CORE_CLIENT } from "../../../handler.js";
-import { AuthServiceUser } from "./types.js";
 import { urlPath } from "../../paths.js";
+import type {
+  AuthServiceUser,
+  ListUserReportsQuery,
+  UserReportsResult,
+  UserReportsTo,
+} from "./types.js";
 
 export * from "./types.js";
+
+type Params = Record<string, string | number | boolean>;
+
+const definedParams = (query: object): Params =>
+  Object.fromEntries(
+    Object.entries(query).filter(([, value]) => value !== undefined)
+  ) as Params;
 
 export const getUser = async (userId: string): Promise<AuthServiceUser> => {
   const res = await tryHandleRequest<AuthServiceUser>(
@@ -58,4 +70,54 @@ export const getUsersByIds = async (
     `Failed to fetch ${userIds.length} users`
   );
   return res.data.data;
+};
+
+/** The users who report to this one, directly or at any depth. */
+export const listUserReports = async (
+  userId: string,
+  query: ListUserReportsQuery = {}
+): Promise<UserReportsResult> => {
+  const res = await tryHandleRequest<UserReportsResult>(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.auth.listUserReports",
+      method: "GET",
+      url: urlPath`/v1/admin/users/${userId}/reports`,
+      params: definedParams(query),
+    },
+    "AS_0119",
+    `Failed to list the reports of user ${userId}`
+  );
+  return res.data;
+};
+
+export const setUserReportsTo = async (
+  userId: string,
+  reportsToId: string
+): Promise<UserReportsTo> => {
+  const res = await tryHandleRequest<UserReportsTo>(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.auth.setUserReportsTo",
+      method: "PUT",
+      url: urlPath`/v1/admin/users/${userId}/reports-to`,
+      data: { userId: reportsToId },
+    },
+    "AS_0120",
+    `Failed to set who user ${userId} reports to`
+  );
+  return res.data;
+};
+
+export const clearUserReportsTo = async (userId: string): Promise<void> => {
+  await tryHandleRequest(
+    {
+      clientName: CORE_CLIENT,
+      requestName: "core.auth.clearUserReportsTo",
+      method: "DELETE",
+      url: urlPath`/v1/admin/users/${userId}/reports-to`,
+    },
+    "AS_0121",
+    `Failed to clear who user ${userId} reports to`
+  );
 };

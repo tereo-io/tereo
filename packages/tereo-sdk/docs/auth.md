@@ -77,6 +77,7 @@ scopes this service defines with `requireScope`.
 | `validateUserExists(userId)` | `boolean` | as `getUser` |
 | `getOrganization(id)` | `AuthServiceOrganization \| null` (null on 404) — `id` is the JWT `org_id` | 5 min; not-found 60 s |
 | `listUserGroups(userId, { includeArchived }?)` | `UserGroup[] \| null` — the user's groups, global and in any organization, each with its `organization` (null for a global group); archived groups only with `includeArchived`. Null on 404: no such user, or a core that predates groups. `GET /v1/admin/users/:id/groups`; needs `users.read` (`user_resolver`) | None |
+| `listUserReports(userId, { transitive }?)` | `UserReport[] \| null` — who reports to the user, ordered by depth then email: direct reports, or with `transitive` everyone below (`depth` 1 is direct), deactivated users included and passed through. Null on 404: no such user, or a core that predates the hierarchy. Rejects with `httpStatus` 422 when more than 10,000 users or 64 levels are below, never a truncated list. `GET /v1/admin/users/:id/reports`; needs `users.read` (`user_resolver`) | None |
 | `getGroup(id)` | `Group \| null` (null on 404), archived or not. `GET /v1/admin/groups/:id`; needs `groups.read` (`group_resolver`, which core 0.8.1 and later declares). Without it core answers 403 for every id, existing or not, so the call rejects | None |
 | `invalidateToken(token)` | Nothing. Drops the token's cached introspection, so its next use asks core | — |
 | `invalidateUser(...userIds)` | Nothing. Drops the cached lookup of each user, found or not | — |
@@ -99,6 +100,12 @@ refusal, or any failure but the 404 that becomes `null`, rejects with a `Request
 a UUID rejects with core's `400`; only `getUsers` answers `null` for it. One exception:
 `getOrganization("default")` reaches core's `GET /v1/admin/organizations/default` and returns the
 default organization, cached under `default`.
+
+`core.auth.users.setReportsTo(userId, reportsToId)` makes a user report to another and returns
+`UserReportsTo`; `core.auth.users.clearReportsTo(userId)` removes it. Both need
+`users.reports.write`, which no requestable role carries, so a service cannot be granted it by
+`access`. Core refuses loops, service accounts, the system user and a guest manager with `400`.
+Reading SCIM's enterprise `manager` attribute is not supported.
 
 Core only reports a token active to this service when it was issued to this service's own client,
 or its audience includes this service's slug — an audience in the issuing service's provisioning document (`access.audiences`, see

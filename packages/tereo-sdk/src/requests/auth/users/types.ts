@@ -89,3 +89,42 @@ export interface AuthServiceUserPermissionsResponse {
   /** Flat list of permission names, e.g. `"users.read"`. */
   permissions: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Reports-to
+// ---------------------------------------------------------------------------
+
+export interface ListUserReportsQuery {
+  /** Include reports at every depth, not only direct ones. */
+  transitive?: boolean;
+}
+
+/** A user who reports to the one asked about; `depth` 1 is a direct report. */
+export interface UserReport {
+  id: string;
+  email: string;
+  name: string | null;
+  isActive: boolean;
+  userType: AuthServiceUserType;
+  reportsToId: string;
+  depth: number;
+}
+
+/** Response of `GET /v1/admin/users/:id/reports`, ordered by depth then email. */
+export interface UserReportsResult {
+  data: UserReport[];
+  nextCursor: null;
+}
+
+export interface ReportsToUser {
+  id: string;
+  email: string;
+  name: string | null;
+  isActive: boolean;
+}
+
+/** Response of `PUT /v1/admin/users/:id/reports-to`. */
+export interface UserReportsTo {
+  userId: string;
+  reportsTo: ReportsToUser | null;
+}
