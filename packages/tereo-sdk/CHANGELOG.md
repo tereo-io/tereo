@@ -1,3 +1,13 @@
+## 0.5.4 (2026-11-20)
+
+### 🚀 Features
+
+- `listUserReports(userId, { transitive })` reads who reports to a user, directly or at any depth (deactivated users included), with `users.read`; `core.auth.users.setReportsTo` and `clearReportsTo` change it with `users.reports.write`. ([#66](https://github.com/tereo-io/tereo/pull/66))
+
+### ❤️ Thank You
+
+- Aaron Leman
+
 ## 0.5.3 (2026-11-16)
 
 ### 🚀 Features
