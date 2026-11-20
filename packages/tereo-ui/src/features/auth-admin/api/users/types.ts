@@ -35,6 +35,31 @@ export interface UserDetail extends User {
   scimExcluded: ScimExclusion | null;
   /** Requests per second this account may make; null follows the default. */
   rateLimitPerSecond?: number | null;
+  reportsTo: ReportsToUser | null;
+  directReportCount: number;
+}
+
+export interface ReportsToUser {
+  id: string;
+  email: string;
+  name: string | null;
+  isActive: boolean;
+}
+
+export interface UserReportsTo {
+  userId: string;
+  reportsTo: ReportsToUser | null;
+}
+
+export interface UserReport {
+  id: string;
+  email: string;
+  name: string | null;
+  isActive: boolean;
+  userType: "human" | "service_account" | "guest";
+  reportsToId: string;
+  /** 1 is a direct report. */
+  depth: number;
 }
 
 export interface UserRole {

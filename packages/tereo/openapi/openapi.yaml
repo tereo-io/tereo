@@ -1144,6 +1144,10 @@ paths:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}'
   /v1/admin/users/{id}/groups:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1groups'
+  /v1/admin/users/{id}/reports:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1reports'
+  /v1/admin/users/{id}/reports-to:
+    $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1reports-to'
   /v1/admin/users/{id}/roles:
     $ref: './paths/auth/admin/users.yaml#/~1admin~1users~1{id}~1roles'
   /v1/admin/users/{id}/permissions:
@@ -2134,6 +2138,8 @@ webhooks:
     $ref: './paths/auth/admin/users.yaml#/auth.user.updated'
   auth.user.roles-changed:
     $ref: './paths/auth/admin/users.yaml#/auth.user.roles-changed'
+  auth.user.reports-to-changed:
+    $ref: './paths/auth/admin/users.yaml#/auth.user.reports-to-changed'
   auth.user.rate-limit-changed:
     $ref: './paths/auth/admin/users.yaml#/auth.user.rate-limit-changed'
   auth.user.totp-enabled:

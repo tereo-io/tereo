@@ -12,6 +12,10 @@ import type {
   ListUserGroupsQuery,
   UserGroup,
 } from "../requests/auth/groups/types.js";
+import type {
+  ListUserReportsQuery,
+  UserReport,
+} from "../requests/auth/users/types.js";
 import {
   ForbiddenError,
   NotFoundError,
@@ -374,6 +378,29 @@ export class AuthServiceClient {
     if (this.testMode) return [];
     try {
       return (await requests.auth.listUserGroups(userId, query)).data;
+    } catch (error) {
+      if (getOriginalStatus(error) === 404) return null;
+      throw error;
+    }
+  }
+
+  /**
+   * The users who report to this one, ordered by depth then email: direct
+   * reports, or with `transitive` everyone below, deactivated users included.
+   * Null when core answers 404 (no such user, or a core that predates the
+   * hierarchy); any other failure rejects with a `RequestError`, including
+   * `httpStatus` 422 when more than 10,000 users or 64 levels are below, so a
+   * list is never truncated. Needs `users.read` (`user_resolver`). Not cached.
+   *
+   * In test mode (`createCoreClient({ testMode: true })`), returns no reports.
+   */
+  async listUserReports(
+    userId: string,
+    query: ListUserReportsQuery = {}
+  ): Promise<UserReport[] | null> {
+    if (this.testMode) return [];
+    try {
+      return (await requests.auth.listUserReports(userId, query)).data;
     } catch (error) {
       if (getOriginalStatus(error) === 404) return null;
       throw error;

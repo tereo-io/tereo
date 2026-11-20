@@ -167,6 +167,14 @@ export type {
   PasswordSetupLink,
 } from "./requests/auth/guests/types.js";
 
+export type {
+  ListUserReportsQuery,
+  ReportsToUser,
+  UserReport,
+  UserReportsResult,
+  UserReportsTo,
+} from "./requests/auth/users/types.js";
+
 // --- Groups ------------------------------------------------------------------
 
 export type {

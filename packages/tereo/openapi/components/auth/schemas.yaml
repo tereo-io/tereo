@@ -1357,8 +1357,17 @@ AdminUserDetail:
   allOf:
     - $ref: '#/AdminUser'
     - type: object
-      required: [managedBy, scimExcluded]
+      required: [managedBy, scimExcluded, reportsTo, directReportCount]
       properties:
+        reportsTo:
+          description: Who the user reports to (`PUT /v1/admin/users/{id}/reports-to`), or `null`
+          oneOf:
+            - type: 'null'
+            - $ref: '#/ReportsToUser'
+        directReportCount:
+          type: integer
+          minimum: 0
+          description: How many users report directly to this one, deactivated included
         scimExcluded:
           description: |
             The provider whose SCIM connection an admin unlinked the user from, or
@@ -1407,6 +1416,79 @@ AdminUserDetail:
                   format: uuid
                 name:
                   type: string
+
+ReportsToUser:
+  type: object
+  required: [id, email, name, isActive]
+  properties:
+    id:
+      type: string
+      format: uuid
+    email:
+      type: string
+    name:
+      type: [string, 'null']
+    isActive:
+      type: boolean
+
+UserReportsTo:
+  type: object
+  required: [userId, reportsTo]
+  properties:
+    userId:
+      type: string
+      format: uuid
+    reportsTo:
+      description: Who the user reports to, or `null`
+      oneOf:
+        - type: 'null'
+        - $ref: '#/ReportsToUser'
+
+SetReportsToRequest:
+  type: object
+  required: [userId]
+  properties:
+    userId:
+      type: string
+      format: uuid
+      description: The user to report to
+
+UserReport:
+  type: object
+  required: [id, email, name, isActive, userType, reportsToId, depth]
+  properties:
+    id:
+      type: string
+      format: uuid
+    email:
+      type: string
+    name:
+      type: [string, 'null']
+    isActive:
+      type: boolean
+    userType:
+      type: string
+      enum: [human, service_account, guest]
+    reportsToId:
+      type: string
+      format: uuid
+      description: The user this one reports to directly
+    depth:
+      type: integer
+      minimum: 1
+      description: 1 for a direct report of the user asked about, 2 for a report's report, and so on
+
+UserReportsResponse:
+  type: object
+  required: [data, nextCursor]
+  properties:
+    data:
+      type: array
+      items:
+        $ref: '#/UserReport'
+    nextCursor:
+      type: 'null'
+      description: Always `null`; the list is never paginated
 
 CreateUserRequest:
   type: object

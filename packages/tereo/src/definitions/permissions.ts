@@ -141,6 +141,11 @@ const AUTH_SERVICE_PERMISSIONS: PermissionDefinition[] = [
     "Invite, extend and shorten guests, and issue their password setup links"
   ),
   adminPermission(
+    "users.reports.write",
+    "Write Reporting Lines",
+    "Set and clear who each user reports to. Apps may let a user see the records of everyone who reports to them"
+  ),
+  adminPermission(
     "roles.read",
     "Read Roles",
     "View roles and their permissions"

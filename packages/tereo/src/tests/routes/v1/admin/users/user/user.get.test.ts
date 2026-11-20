@@ -193,3 +193,47 @@ describe("GET /v1/admin/users/:id managedBy for a SCIM-managed user", () => {
     });
   });
 });
+
+describe("GET /v1/admin/users/:id reportsTo", () => {
+  it("carries reportsTo and directReportCount", async () => {
+    const [d, c, x, y] = await Promise.all(
+      [1, 2, 3, 4].map(() => createTestUser())
+    );
+    const ids = [d, c, x, y].map((u) => u.id);
+    await prisma.user.update({
+      where: { id: c.id },
+      data: { reportsToId: d.id },
+    });
+    await prisma.user.updateMany({
+      where: { id: { in: [x.id, y.id] } },
+      data: { reportsToId: c.id },
+    });
+    try {
+      const get = async (id: string) => {
+        const res = await fetchJson(
+          "GET",
+          `${BASE_URL}/v1/admin/users/${id}`,
+          adminToken
+        );
+        expect(res.status).toBe(HTTP_STATUS.OK);
+        return res.body;
+      };
+      const manager = await get(c.id);
+      expect(manager.reportsTo).toEqual({
+        id: d.id,
+        email: d.email,
+        name: d.name,
+        isActive: true,
+      });
+      expect(manager.directReportCount).toBe(2);
+      const top = await get(d.id);
+      expect(top.reportsTo).toBeNull();
+      expect(top.directReportCount).toBe(1);
+    } finally {
+      await prisma.user.updateMany({
+        where: { id: { in: ids } },
+        data: { reportsToId: null },
+      });
+    }
+  });
+});

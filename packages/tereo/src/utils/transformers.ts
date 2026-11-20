@@ -2,6 +2,7 @@ import { toOrgRef, toServiceRef, toUserRef, type OrgRef } from "./refs.js";
 import type { IntegrationRow, ServiceWithClient } from "./db/services.js";
 import { previousSecretExpiry } from "./webhookSigning.js";
 import { maskCustomHeaders } from "./webhookHeaders.js";
+import type { ReportRow } from "./db/reports.js";
 import db from "./db/index.js";
 import {
   ClientType,
@@ -148,6 +149,41 @@ export const formatUser = (user: {
     : null,
   createdAt: user.createdAt.toISOString(),
   updatedAt: user.updatedAt.toISOString(),
+});
+
+export type ReportsToUser = {
+  id: string;
+  email: string;
+  name: string | null;
+  isActive: boolean;
+};
+
+export const formatReportsTo = (
+  user: ReportsToUser | null
+): ReportsToUser | null =>
+  user === null
+    ? null
+    : {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        isActive: user.isActive,
+      };
+
+export type UserReport = ReportsToUser & {
+  userType: UserType;
+  reportsToId: string;
+  depth: number;
+};
+
+export const formatUserReport = (row: ReportRow): UserReport => ({
+  id: row.id,
+  email: row.email,
+  name: row.name,
+  isActive: row.isActive,
+  userType: row.userType,
+  reportsToId: row.reportsToId,
+  depth: row.depth,
 });
 
 export const formatAdminUser = (
